@@ -1,5 +1,5 @@
 # ADRs (Architecture Decision Records)
-**Date:** 2026-01-28
+**Date:** 2026-02-27
 
 This folder contains Architecture Decision Records (ADRs) that document important technical decisions.
 
