@@ -1,51 +1,47 @@
 # 0001-decentdb-flutter-binding-strategy
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-02-27
 - **Decision owners:** Gridlock maintainers
 - **Related:** PRD/SPEC (DecentDB-first + performance + cross-platform desktop)
 
 ## Decision
-Adopt **Dart FFI** as the primary integration mechanism between Gridlock (Flutter) and DecentDB, using a **stable C-compatible ABI** exposed to Dart.
+Use **DecentDB’s official Dart FFI bindings** as the *only* supported integration mechanism between Gridlock (Flutter) and DecentDB.
 
-Select one of:
-- **A. Use an official DecentDB C ABI** (preferred if available/stable)
-- **B. Build a thin C shim** that wraps the existing DecentDB Nim API into a stable C ABI (preferred if Nim API is canonical and no C ABI exists yet)
+Source of truth:
+- Upstream-provided bindings can be downloaded from the DecentDB releases page.
+- For local development, the bindings can also be used from a locally cloned DecentDB repo.
 
-For MVP we will implement **Option B** unless an official DecentDB C ABI exists that meets stability/performance needs.
+We will not build or maintain a custom C shim or any alternative binding layer unless the upstream Dart FFI bindings become insufficient for required features/performance.
 
 ## Rationale
 - Flutter does not provide a native DB “driver” layer; high-performance embedded DB access is typically done via **Dart FFI**.
 - FFI minimizes overhead vs platform channels and supports high-throughput calls (query paging, import bulk load).
-- A C-compatible ABI is the most practical bridge target for Dart; direct Nim calls from Dart are not feasible.
+- Using the upstream DecentDB Dart bindings reduces maintenance burden and keeps us aligned with the engine’s supported ABI surface.
 - Packaging native libs alongside Flutter desktop builds is standard and repeatable.
 
 ## Alternatives considered
-1. **Platform channels (MethodChannel)**
+1. **Build/maintain a custom C shim**
+   - Pros: complete control over ABI and packaging
+   - Cons: ongoing maintenance surface; higher risk of drift from DecentDB behavior
+2. **Platform channels (MethodChannel)**
    - Pros: simpler initial glue
    - Cons: higher overhead, more boilerplate per platform, awkward for high-frequency paging/streaming, harder cancellation semantics
-2. **Pure Dart implementation**
+3. **Pure Dart implementation**
    - Pros: single language
    - Cons: unrealistic for embedded DB engine performance/feature set; duplicates DecentDB
-3. **Run DecentDB as a separate process**
+4. **Run DecentDB as a separate process**
    - Pros: isolation
    - Cons: complexity, packaging, IPC overhead, worse offline/local UX
 
 ## Trade-offs
 - **FFI + native libs** increases build/packaging complexity (per-OS artifacts).
 - Requires careful memory management and thread-safety across the boundary.
-- A shim introduces an additional maintenance surface; mitigate by keeping shim minimal and well-tested.
+- Depending on upstream bindings means we must track DecentDB binding releases and pin versions for reproducible builds.
 
 ## Implementation notes (non-normative)
-### Required MVP ABI surface (minimum)
-- `db_open(path, flags) -> handle`
-- `db_close(handle)`
-- `db_exec(handle, sql) -> status/error`
-- `db_query_open(handle, sql, options) -> cursor_handle`
-- `db_query_next(cursor_handle, page_size) -> row_batch + metadata`
-- `db_query_close(cursor_handle)`
-- `db_cancel(handle_or_cursor)` (best-effort)
-- `db_last_error(...)` or structured error return
+### Binding API surface
+Gridlock will use the API exposed by the upstream DecentDB Dart bindings. If any required capability is missing (paging/streaming contract, cancellation, structured errors), we will first attempt to upstream changes rather than introducing a local shim.
 
 ### Packaging
 - Bundle dynamic libraries with desktop apps:
@@ -59,4 +55,4 @@ For MVP we will implement **Option B** unless an official DecentDB C ABI exists 
 
 ## References
 - Flutter/Dart FFI platform integration docs
-- DecentDB Nim API reference (for shim mapping)
+- DecentDB Dart bindings (upstream)
