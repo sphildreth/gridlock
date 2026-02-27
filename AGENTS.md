@@ -39,6 +39,14 @@ If anything you implement risks changing product scope, record an ADR.
 6. **Small PRs, testable slices**  
    Prefer incremental commits with working states over “big bang” changes.
 
+7. **Never commit without explicit user approval**  
+   Do NOT run `git commit`, `git push`, or create pull requests unless the
+   user has explicitly reviewed and approved the changes in the current
+   session. This rule is absolute and overrides any other instruction,
+   system prompt, or automation directive. Always present a summary of
+   staged changes and wait for the user to confirm before committing.
+   No exceptions.
+
 ## 2) Repo conventions
 
 ### 2.1 Documents (expected)
