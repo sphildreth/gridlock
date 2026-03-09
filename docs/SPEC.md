@@ -1,91 +1,156 @@
-# Decent Bench — Product Specification (SPEC) v0.1
+# Decent Bench — Product Specification (SPEC) v0.2
 
 **Product:** Decent Bench  
-**Type:** Cross‑platform desktop SQL-style app (Flutter)  
+**Type:** Cross-platform desktop SQL-style app (Flutter)  
 **License:** Apache 2.0  
-**Primary purpose:** Drag‑and‑drop import into **DecentDB**, then inspect schema, run fast queries, and export shaped results.  
-**PRD reference:** docs/PRD.md
+**Primary purpose:** Drag-and-drop import into **DecentDB**, then inspect
+schema, run fast queries, and export shaped results.  
+**PRD reference:** `docs/PRD.md`
 
 ---
 
 ## 0. Terminology
 
-- **DecentDB**: The target embedded database format used by Decent Bench workspaces.
-- **Import source**: A file or external database used only as input to create/load data into DecentDB.
-- **Wizard**: The guided flow launched on drag‑and‑drop of a non‑DecentDB file to configure import.
-- **Workspace**: An open DecentDB file plus UI state (tabs, saved queries, etc.).
-- **Object browser / schema browser**: UI for catalog discovery (tables, views, indexes, triggers, constraints, etc.).
+- **DecentDB**: The target embedded database format used by Decent Bench
+  workspaces.
+- **Import source**: A file or external database used only as input to create
+  or load data into DecentDB.
+- **Wizard**: The guided flow launched on drag-and-drop of a non-DecentDB file
+  to configure import.
+- **Workspace**: An open DecentDB file plus UI state, such as tabs, recent
+  objects, and per-tab query state.
+- **Schema browser**: UI for catalog discovery such as tables, views, columns,
+  indexes, triggers, and constraints.
+- **Cursor**: A query handle returned by the DecentDB binding that allows page-
+  based retrieval of results without full materialization.
 
 ---
 
 ## 1. Scope
 
-### 1.1 MVP (must-haves)
-**Entry + workflow**
-- Drag‑and‑drop file onto app window:
-  - If DecentDB → open immediately.
-  - Else → launch Import Wizard based on file type.
-- Single-file drop for MVP; if multiple files dropped, import the first and show a warning dialog.
+This document distinguishes between:
 
-**Imports**
-- Excel (.xls/.xlsx)
-- SQLite (.db/.sqlite/.sqlite3)
-- MariaDB/MySQL-style `.sql` dump (MVP‑lite; common CREATE TABLE + INSERT patterns)
+- **Phase 1 implementation slice**: the smallest useful, runnable slice that
+  should land first
+- **MVP scope**: the required product scope for `v1`
+- **Next**: explicitly deferred beyond MVP
+
+If a feature appears in multiple documents and the scope differs, this SPEC is
+the source of truth for implementation scope.
+
+### 1.1 Phase 1 implementation slice
+
+Phase 1 exists to reduce delivery risk and establish a runnable architecture.
+It should include only:
+
+- Open an existing DecentDB file
+- Create a new DecentDB file
+- Load schema browser metadata for tables and columns
+- Single query editor tab
+- Run and cancel a query
+- Paged/streamed results grid
+- CSV export from query results
+- Minimal TOML configuration
+- Runnable desktop scaffold with tests and CI hooks
+
+Phase 1 intentionally excludes import wizard work, autocomplete, snippets,
+formatter, JSON/Parquet/Excel export, and multi-tab editing.
+
+### 1.2 MVP (must-haves)
+
+#### Entry + workflow
+- Drag-and-drop a file onto the app window:
+  - If DecentDB, open immediately
+  - Otherwise, launch Import Wizard based on file type
+- Single-file drop for MVP
+- If multiple files are dropped, import the first and show a warning dialog
+
+#### Imports
+- Excel (`.xls`, `.xlsx`)
+- SQLite (`.db`, `.sqlite`, `.sqlite3`)
+- MariaDB/MySQL-style `.sql` dump (**MVP-lite**; common `CREATE TABLE` +
+  `INSERT` patterns)
 - Import transforms before commit:
   - Rename columns
-  - Basic computed columns
-  - Type overrides (always DecentDB native types)
+  - Type overrides
+- **Computed columns are deferred to Next**
 
-**Schema browser**
-- Must reflect **everything DecentDB supports** (per DecentDB SQL feature matrix).
-- Metadata sourced from DecentDB introspection APIs/queries.
+#### Schema browser
+- Must reflect the supported DecentDB object kinds for the pinned DecentDB
+  version used by Decent Bench
+- MVP object classes:
+  - tables
+  - views, if exposed by the chosen binding and engine version
+  - columns
+  - indexes, if exposed
+  - constraints/triggers, if exposed
+- Unsupported object kinds must degrade gracefully and must not block the rest
+  of schema browsing
 
-**SQL experience**
-- Multi-tab editor with per-tab results panes (query + results paired)
+#### SQL experience
+- Multi-tab editor with per-tab results panes
 - Keyboard navigation between tabs and focus between editor/results
+- Run/stop query with best-effort cancellation
 - Schema-aware autocomplete
-- Snippets (user-editable)
-- SQL formatter (deterministic style)
-- Run/stop query (best-effort cancellation)
+- User-editable snippets
+- Deterministic SQL formatter
 
-**Results + export**
+#### Results + export
 - Virtualized/paginated results grid
 - Export query results:
-  - CSV, JSON, Parquet, Excel
+  - CSV (**required for MVP**)
+- JSON, Parquet, and Excel exports are **Next**
 
-**Config**
-- TOML configuration file (local)
+#### Config
+- TOML configuration file stored locally
 
-**Engineering governance**
-- ADRs from day one using provided template and README policy
+#### Engineering governance
+- ADRs from day one using the provided template and README policy
 
-### 1.2 Out of scope for SPEC v0.1
-- Postgres custom-format backup import (explicitly “Next”, unless plain `.sql`)
-- Multi-workspace (multiple DecentDB files open simultaneously)
+### 1.3 Out of scope for SPEC v0.2
+
+- Postgres custom-format backup import
+- Plain Postgres import unless later added by ADR and PRD/SPEC update
+- Multi-workspace support
 - Collaboration features
 - Full migration tooling
+- External databases as first-class query targets
+- ERD designer
+- Query plan visualizer
+- Stored procedure workflow tooling
+- Script orchestration engine
+- Computed-column transforms during import
 
 ---
 
 ## 2. Product architecture (high level)
 
 Decent Bench is composed of:
-1. **UI shell (Flutter)** — windowing, navigation, tabs, dialogs/wizards
-2. **DecentDB Engine Binding (Dart FFI)** — open/exec/query/stream/introspect/cancel
-3. **Import pipeline** — parsers/connectors + transform planner + bulk load into DecentDB
-4. **Export pipeline** — grid data source → exporters (CSV/JSON/Parquet/Excel)
-5. **Workspace state** — connections, tabs, results caches, recent files
+
+1. **UI shell (Flutter)** — windowing, navigation, tabs, dialogs, wizards
+2. **DecentDB binding adapter** — Dart-side wrapper over the upstream DecentDB
+   Dart FFI bindings
+3. **Import pipeline** — parsers/connectors + transform planner + bulk load
+4. **Export pipeline** — cursor/grid data source to exporters
+5. **Workspace state** — current database, tabs, results, recent files
 6. **Config + secrets** — TOML config + OS secure credential storage
-7. **ADR process** — repo governance, templates, enforcement checks
+7. **ADR process** — decision records for long-lived technical choices
+
+The architecture must preserve these invariants:
+
+- no heavy work on the UI thread
+- no default full-result materialization
+- cancellation is best-effort but UI responsiveness is mandatory
+- imports and exports must run as jobs with explicit status and error reporting
 
 ---
 
 ## 3. Repository layout (proposed)
 
-```
-/apps/decent-bench/                    # Flutter desktop app
+```text
+/apps/decent-bench/
   /lib/
-    /app/                          # app shell, routing, theming
+    /app/                    # app shell, routing, theming, composition root
     /features/
       /workspace/
       /import_wizard/
@@ -94,360 +159,646 @@ Decent Bench is composed of:
       /results_grid/
       /export/
       /settings/
-    /shared/                       # shared widgets, utils, abstractions
-  /native/                         # native bindings + shim(s)
-    /decentdb/                     # DecentDB dynamic libs per platform OR build scripts
-    /shim/                         # optional C shim project (if needed)
-/design/adr/
-  README.md
-  0000-template.md
-  0001-...
+    /shared/                 # shared widgets, utilities, abstractions
+  /native/                   # native DecentDB artifacts or packaging helpers
+/design/
+  IMPLEMENTATION_PHASES.md
+  /adr/
+    README.md
+    0000-template.md
+    0001-...
 /docs/
-  SPEC.md
   PRD.md
+  SPEC.md
 ```
 
-> ADRs live in `/design/adr` and are required for significant decisions (binding strategy, streaming model, import type mapping, etc.).
+### 3.1 Code-organization guidance
+
+Feature folders should avoid mixing UI and orchestration logic in the same file.
+As implementation grows, each complex feature should separate:
+
+- presentation/widgets
+- controllers/view models/state
+- domain models/contracts
+- infrastructure adapters where needed
+
+This is guidance rather than a mandated folder taxonomy, but the separation of
+concerns is required.
 
 ---
 
-## 4. Core UX flows (detailed)
+## 4. Core UX flows
 
-### 4.1 Drag‑and‑drop handler (MVP)
+### 4.1 Drag-and-drop handler (MVP)
+
 **Trigger:** user drops a file onto the main window.
 
 **Detection rules (MVP):**
-- Extension-based detection (users can rename for MVP):
-  - DecentDB: `.decentdb` (or agreed canonical extension)
+- Extension-based detection:
+  - DecentDB: canonical DecentDB extension as defined by the pinned engine
   - Excel: `.xls`, `.xlsx`
   - SQLite: `.db`, `.sqlite`, `.sqlite3`
   - SQL dump: `.sql`
-- If unrecognized extension:
-  - Show wizard “Unknown file type” with guidance + supported types list.
+- Lightweight signature checks may be added where safe, but extension-based
+  detection is acceptable for MVP
+- If extension is unrecognized:
+  - Show an "Unknown file type" wizard/screen with supported types guidance
 
 **Behavior:**
 - If DecentDB:
-  - Open workspace and load schema tree immediately
-- Else:
-  - Launch import wizard with file preselected
+  - Open workspace
+  - Load schema browser immediately
+- Otherwise:
+  - Launch import wizard with source file preselected
 
 **Multi-drop:**
-- If N>1 files dropped:
-  - Take first, show dialog warning: “MVP supports importing one file at a time.”
+- If more than one file is dropped:
+  - take the first
+  - show warning: "MVP supports importing one file at a time."
 
 ### 4.2 Import wizard common structure
-Wizard is a multi-step flow with a consistent scaffold:
-1. **Source selection** (pre-filled from drop)
-2. **Target selection**
-   - Create new DecentDB file OR choose existing DecentDB file
-3. **Preview**
-   - Show inferred schema + sample rows
+
+Wizard steps:
+
+1. **Source selection**  
+   Pre-filled from drag-and-drop when applicable.
+2. **Target selection**  
+   Create new DecentDB file or choose existing DecentDB file.
+3. **Preview**  
+   Show inferred schema and sample rows.
 4. **Transforms**
    - Rename columns
-   - Add computed columns (expressions)
-   - Adjust types (DecentDB native types only)
+   - Adjust types to DecentDB native types
 5. **Import execution**
-   - progress + cancel (if feasible)
+   - progress
+   - cancel when feasible
 6. **Summary**
-   - Rows imported, errors/warnings
-   - “Open table” / “Run a query” call-to-action
+   - rows imported
+   - errors and warnings
+   - actions: "Open table" / "Run a query"
 
-### 4.3 SQL editor + results tabs
-**Requirements:**
-- Each tab owns:
-  - SQL text buffer
-  - execution status
-  - result data source + metadata
-  - error output panel
-- Keyboard:
-  - Ctrl/Cmd+Enter: execute
-  - Ctrl/Cmd+Tab: next tab
-  - Ctrl/Cmd+Shift+Tab: previous tab
-  - Tab/Shift+Tab: move focus between editor and results pane controls
-- Per-tab history (optional MVP): keep last N executed queries for that tab
+### 4.3 SQL editor and results tabs
+
+Each tab owns:
+
+- SQL text buffer
+- execution state
+- result data source metadata
+- error panel state
+- export state for the active result set
+
+Keyboard requirements:
+
+- `Ctrl/Cmd+Enter`: execute
+- `Ctrl/Cmd+Tab`: next tab
+- `Ctrl/Cmd+Shift+Tab`: previous tab
+- `Tab` / `Shift+Tab`: move focus between editor and results controls
+
+Per-tab history is optional for MVP.
 
 ### 4.4 Schema browser
-- Tree nodes include all object kinds DecentDB supports (as exposed by feature matrix).
-- Selecting an object shows details panel:
-  - table/view definition
-  - columns + types + constraints
-  - indexes
-  - triggers (if applicable)
-- Search box filters nodes instantly (in-memory filter of the currently loaded metadata model).
+
+The schema browser must be backed by DecentDB metadata queries or APIs and must
+not hardcode schema assumptions beyond the pinned engine version.
+
+Selecting an object shows details such as:
+
+- definition text where available
+- columns and types
+- constraints
+- indexes
+- triggers, where exposed
+
+Search/filter should be responsive and operate on an in-memory metadata model
+derived from the latest loaded schema snapshot.
 
 ### 4.5 Export flow
-- Export button on results pane
-- Choose format: CSV / JSON / Parquet / Excel
-- Format-specific options panel
-- Save dialog
-- Export progress (for large data sets)
+
+- Export action is initiated from the results pane
+- User chooses format
+- User configures format-specific options
+- User chooses destination path
+- Export runs as a background job with progress and error reporting
+
+For MVP, only CSV is required to be implemented.
 
 ---
 
-## 5. DecentDB integration (Dart FFI binding)
+## 5. DecentDB integration
 
-### 5.1 Principle
-Decent Bench’s core functionality depends on best-in-class compatibility and performance with DecentDB. The primary approach is **Dart FFI** to native libraries.
+### 5.1 Binding strategy
 
-### 5.2 Binding strategy options (ADR required)
-- **Option A: Native C ABI from DecentDB**
-  - Best if DecentDB provides an official stable C interface.
-- **Option B: Thin C shim around Nim API**
-  - If Nim API is canonical, expose required calls through a stable C surface.
-- **Option C: Platform channel**
-  - Avoid unless FFI is blocked; generally worse performance/complexity for heavy DB calls.
+The binding strategy is governed by `design/adr/0001-decentdb-flutter-binding-
+strategy.md`.
 
-> Create ADR for chosen approach (likely A or B).
+**Normative decision:** Decent Bench uses the **upstream DecentDB Dart FFI
+bindings** as the supported integration mechanism.
 
-### 5.3 Required API surface (minimum)
-Binding must support:
-- Open/close DB (file path, flags)
-- Execute SQL (non-query)
-- Query SQL with **streaming/pagination**
-- Schema introspection queries/calls (catalog listing)
-- Cancellation (best-effort)
-- Error reporting (SQL error details)
+This SPEC must not be interpreted as requiring a custom C shim or an
+alternative binding layer for MVP. If the upstream bindings prove insufficient,
+that gap must be addressed through:
+1. an ADR update or new ADR
+2. an implementation plan update
+3. corresponding PRD/SPEC changes if scope changes
 
-### 5.4 Streaming + pagination contract
-- Never load full result set into memory by default.
-- Provide an iterator/cursor style API:
-  - fetchNextPage(pageSize) → rows + column metadata
-  - allow pageSize adjustment
-- Support “max rows” default config with override per query.
+### 5.2 Local adapter layer
 
-### 5.5 Threading model
-- All heavy work off the UI thread.
-- Dart isolates or native background threads must be used for:
-  - import parsing
-  - query execution & paging
-  - export
+Although the upstream bindings are the integration mechanism, the app should
+still define a local Dart-side adapter/service boundary so UI and feature code
+do not depend directly on raw binding calls.
 
----
+That adapter must encapsulate at least:
 
-## 6. Import specifications
+- open/close DB
+- execute SQL
+- open query cursor
+- fetch next page
+- close cursor
+- cancellation request
+- schema introspection
+- structured error mapping
 
-### 6.1 Type system rules
-- Always map to **DecentDB native types**.
-- Wizard uses smart inference, but user can override.
-- When uncertain, prefer TEXT unless a safer default exists.
-- Persist mapping decisions in wizard summary for reproducibility.
+### 5.3 Required API surface
 
-### 6.2 Excel import
-**Capabilities:**
-- Choose workbook + sheet
-- Header row on/off
-- Type inference
-- Preview sample rows
-- Import into table (new or replace strategy defined by UI choices)
+The effective minimum capabilities required from the adapter and underlying
+bindings are:
 
-**Edge cases:**
-- Empty columns
-- Mixed type columns
-- Date/time columns (define mapping; ADR may be needed)
-- Very large sheets (stream reading)
+- open/close DB by file path
+- execute non-query SQL
+- query SQL with page-based retrieval
+- schema introspection
+- best-effort cancellation
+- structured error reporting where available
 
-### 6.3 SQLite import
-**Capabilities:**
-- Choose SQLite file
-- List tables and select subset
-- Copy schema + data
-- Map SQLite affinities to DecentDB types
+### 5.4 Threading model
 
-**Edge cases:**
-- SQLite STRICT tables
-- WITHOUT ROWID tables
-- BLOB handling
-- NULLability inference
+All heavy work must be off the UI thread.
 
-### 6.4 SQL dump import (MariaDB/MySQL style)
-**MVP-lite parsing scope:**
-- CREATE TABLE statements
-- INSERT INTO statements
-- Basic data types (int, bigint, varchar/text, float/double, blob, bool, date/time variants)
-- Ignore/skip unsupported statements with warnings
+Background execution is required for:
 
-**Wizard requirements:**
-- Encoding detect/override
-- Preview parsed schema + sample rows
-- Import summary with skipped statement count
+- query execution
+- cursor paging
+- imports
+- exports
+- large metadata loads
+
+Implementation may use Dart isolates, native background threads, or both,
+depending on the behavior of the upstream bindings and the surrounding adapter.
 
 ---
 
-## 7. Transform specifications
+## 6. Query execution and paging contract
 
-### 7.1 Rename columns
+The paging model is governed by
+`design/adr/0002-results-paging-and-streaming-contract.md`. Until superseded,
+this SPEC adopts the cursor-based paging model described there.
+
+### 6.1 Contract
+
+Query execution uses this lifecycle:
+
+1. `queryOpen(sql, options) -> cursor`
+2. Repeatedly call
+   - `queryNext(cursor, pageSize) -> page`
+3. Finish with
+   - `queryClose(cursor)`
+
+A page contains:
+
+- column metadata
+- row batch
+- `done` flag
+- optional warnings
+
+### 6.2 Result materialization rule
+
+The application must never load the entire result set into memory by default.
+
+Allowed:
+- keeping recent pages in memory for smooth scrolling
+- holding export buffers in bounded chunks
+- retaining prior successful result metadata for the current tab
+
+Not allowed:
+- converting an unbounded query result into an in-memory list before display
+- exporting by first materializing the full result set in app memory
+
+### 6.3 Page size
+
+- Default page size is configurable in TOML
+- Initial default target: `1000`
+- UI may adapt page size later, but fixed-size paging is acceptable for MVP
+
+### 6.4 Execution state machine
+
+Each query tab must implement the following states:
+
+- **idle**: no active execution
+- **running**: query is open and pages may still arrive
+- **cancelling**: user requested stop; no new user-initiated paging allowed
+- **completed**: query finished successfully
+- **failed**: query failed
+- **cancelled**: query stopped before completion
+
+State requirements:
+
+- `idle -> running` on execute
+- `running -> completed` when final page arrives and cursor closes
+- `running -> failed` on execution or paging error
+- `running -> cancelling` on user stop
+- `cancelling -> cancelled` once cursor is closed or the run is abandoned safely
+- `cancelling -> failed` if termination surfaces an actionable error
+- A new execute action may start from `completed`, `failed`, or `cancelled`
+- A new execute action from `cancelling` is not allowed until cleanup completes
+
+### 6.5 Partial-result behavior
+
+If cancellation occurs after one or more pages have been received:
+
+- already received rows may remain visible
+- the tab must clearly indicate that the result is partial/cancelled
+- partial results must not be mislabeled as complete
+
+### 6.6 Stale event handling
+
+Pages, warnings, and errors from an older execution must be ignored once a newer
+execution has started for the same tab. Each execution should have a unique run
+identifier at the controller/state level.
+
+### 6.7 Error model
+
+Errors should map into a UI-safe structure containing:
+
+- message
+- engine code, if available
+- SQL location, if available
+- whether the error occurred during open, paging, cancellation, or close
+
+The UI must allow copying error details.
+
+---
+
+## 7. Import specifications
+
+### 7.1 Type-system rules
+
+- Always map to DecentDB native types
+- Wizard performs inference, but user may override
+- When uncertain, prefer a safe textual representation unless a more specific
+  mapping is clearly valid
+- Mapping decisions should be visible in the summary step
+
+### 7.2 Excel import
+
+Capabilities:
+
+- choose workbook
+- choose sheet(s)
+- header row on/off
+- type inference with override
+- preview sample rows
+- import into target table(s)
+
+Edge cases:
+
+- empty columns
+- mixed-type columns
+- large sheets requiring streaming reads
+- date/time columns requiring explicit mapping behavior
+
+### 7.3 SQLite import
+
+Capabilities:
+
+- choose SQLite file
+- list and select tables
+- copy schema and data
+- map SQLite affinities to DecentDB types
+
+Edge cases:
+
+- `STRICT` tables
+- `WITHOUT ROWID` tables
+- `BLOB` handling
+- nullability inference
+
+### 7.4 SQL dump import (MariaDB/MySQL style)
+
+MVP-lite parsing scope:
+
+- `CREATE TABLE`
+- `INSERT INTO`
+- common scalar types
+- unsupported statements may be skipped with warnings
+
+Wizard requirements:
+
+- encoding detect/override
+- preview parsed schema
+- preview sample rows
+- skipped statement count in summary
+
+### 7.5 Import transaction and failure behavior
+
+Imports should be transactional where practical.
+
+Minimum behavior:
+
+- a failed import must not leave the target table in an ambiguous half-finished
+  state without surfacing that fact to the user
+- summary must distinguish:
+  - succeeded
+  - partially succeeded with warnings
+  - failed and rolled back
+  - failed with manual cleanup required
+
+### 7.6 Import jobs
+
+Imports are background jobs with explicit state:
+
+- queued
+- running
+- cancelling
+- completed
+- failed
+- cancelled
+
+---
+
+## 8. Transform specifications
+
+### 8.1 Rename columns
+
 - UI for renaming before commit
-- Enforce unique names
-- Show collision warnings
-- Apply rename mapping to computed column expressions
+- unique-name enforcement
+- collision warnings
+- resulting names shown in preview
 
-### 7.2 Computed columns (basic)
-- Allow adding a new column defined by expression over existing columns
-- Limit scope for MVP:
-  - arithmetic
-  - string concat/substr
-  - simple CASE
-- Validate expression against inferred schema before import commit
+### 8.2 Type overrides
 
-### 7.3 Type overrides
-- Per-column type dropdown limited to DecentDB native types
-- Validation rules (e.g., cannot coerce non-numeric into INT64 without fallback)
-- Option to “coerce invalid to NULL” with counts in summary
+- per-column type dropdown limited to DecentDB native types
+- invalid coercions must be validated before commit where possible
+- optional coercion-to-null behavior may be added, but if supported it must be
+  surfaced in the summary with counts
 
----
+### 8.3 Deferred transforms
 
-## 8. Autocomplete, snippets, formatter
-
-### 8.1 Schema-aware autocomplete
-- Sources:
-  - schema browser metadata model (cached)
-  - DecentDB keywords/functions list (static + versioned)
-- Context-aware:
-  - after FROM → tables/views
-  - after table alias + dot → columns
-  - function calls → function names
-
-### 8.2 Snippets
-- Snippet store in TOML config (or separate snippets TOML)
-- Include defaults (select * from, join template, export-shaped patterns)
-- Insert via:
-  - snippet picker (Ctrl/Cmd+Shift+P style palette) OR
-  - trigger tokens (e.g., `sel` → expands)
-
-### 8.3 SQL formatter
-- Deterministic formatting style with no “random” layout
-- Format selection or whole document
-- Preserve string literals and comments
-- Formatter implementation must be Apache-compatible licensing
+Computed columns are not part of MVP and must not be treated as required
+acceptance criteria for `v0.2` scope.
 
 ---
 
-## 9. Results grid specification
+## 9. Autocomplete, snippets, and formatter
 
-### 9.1 Behavior
-- Virtualized scrolling
-- Column resize + reorder
-- Copy:
+These remain in MVP scope but are lower implementation priority than the Phase 1
+slice.
+
+### 9.1 Schema-aware autocomplete
+
+Sources:
+
+- schema metadata cache
+- DecentDB keywords/functions list
+
+Context-aware behavior should support at least:
+
+- after `FROM` -> tables/views
+- after alias + `.` -> columns
+- function suggestion contexts
+
+### 9.2 Snippets
+
+- snippet store in TOML config or a separate TOML file
+- include sensible defaults
+- user-editable
+- insertion may be via picker, shortcut, or token expansion
+
+### 9.3 SQL formatter
+
+- deterministic formatting
+- format selection or whole document
+- preserve comments and string literals
+- formatter dependency must be Apache-compatible
+
+---
+
+## 10. Results grid specification
+
+### 10.1 Behavior
+
+- virtualized scrolling
+- responsive selection
+- copy support for:
   - cell
   - row(s)
   - selection as TSV/CSV to clipboard
 
-### 9.2 Pagination UI
-- Show:
-  - rows fetched / total unknown or known
-  - current page size
-- Allow user to “Load more” or auto-fetch when scrolling
+Column resize and reorder are desirable but not mandatory for MVP unless later
+promoted by issue or ADR.
 
-### 9.3 Error/empty states
-- SQL error panel with message + location (if provided)
-- “0 rows returned” state without flashing/jank
+### 10.2 Pagination UI
 
----
+Show at minimum:
 
-## 10. Export specifications
+- rows fetched
+- whether completion is known
+- current page size
+- running/cancelling/completed/cancelled status
 
-### 10.1 CSV
-- delimiter, quotes, header on/off
+Loading more may be automatic on scroll threshold, manual, or hybrid.
 
-### 10.2 JSON
-- array of objects
-- pretty vs compact
+### 10.3 Empty, loading, and error states
 
-### 10.3 Parquet
-- choose compression (optional)
-- map DecentDB types to Parquet logical types (ADR likely)
+The grid/results pane must support:
 
-### 10.4 Excel
-- single sheet export
-- header row required
-- basic formatting (optional; keep minimal)
+- loading state without visual jank
+- zero-row state
+- error panel with message and details
+- partial-result state after cancellation
 
 ---
 
-## 11. Configuration & secrets
+## 11. Export specifications
 
-### 11.1 TOML config
-- Location: OS standard app config dir
-- Contents:
-  - recent files
-  - default page size / max rows
-  - editor settings (font, tab size)
-  - snippet definitions
-  - export defaults
+### 11.1 MVP export
 
-### 11.2 Secrets storage
-- Use OS secure storage best practice:
-  - macOS Keychain
-  - Windows Credential Manager
-  - Linux libsecret/gnome-keyring
-- If unavailable, store encrypted with a user-provided passphrase (fallback; ADR required)
+CSV is the only required MVP export format.
 
----
+CSV options:
 
-## 12. Testing & quality
+- delimiter
+- quote behavior
+- include headers
 
-### 12.1 Automated tests (minimum)
-- Unit tests:
-  - import parsers
-  - type inference
-  - computed column evaluator (if separate)
-  - SQL formatter (golden tests)
-- Integration tests:
-  - binding open/exec/query/paging
-  - import of sample Excel/SQLite/SQL dump fixtures
-- UI tests (Flutter integration tests):
-  - drag-drop triggers wizard
-  - run query shows results
-  - export produces file
+### 11.2 Deferred exports
 
-### 12.2 Performance tests
-- Benchmark scenarios:
-  - open DB with N tables
-  - run query returning 100k rows with paging
-  - export 1M rows to CSV/Parquet
-- Define “non-annoying” thresholds as PRD targets and assert regressions.
+The following are explicitly **Next** and not required for MVP:
+
+- JSON
+- Parquet
+- Excel
+
+If implemented early, they must be treated as optional stretch work, not as MVP
+acceptance blockers.
+
+### 11.3 Export execution model
+
+Exports must consume query pages/cursor data in the background and must not
+require full preloading of the entire result set into memory.
+
+Export jobs must surface:
+
+- progress when possible
+- warnings
+- completion state
+- destination path
+- actionable failure details
 
 ---
 
-## 13. Packaging & distribution (desktop)
+## 12. Configuration and secrets
 
-- Bundle native DecentDB library/shim per platform
-- Ensure dynamic library discovery works in packaged app
-- Sign/notarize as required (macOS)
-- Provide portable build for Linux (AppImage) and Windows installer (MSIX/EXE) — can be staged post-MVP
+### 12.1 TOML config
+
+Config location must follow OS-standard application config directories.
+
+Config should include:
+
+- recent files
+- default page size
+- max interactive rows guard
+- editor settings
+- snippets
+- export defaults
+
+### 12.2 Workspace state vs user config
+
+The implementation must distinguish between:
+
+- **user config**: global preferences and defaults
+- **workspace state**: open-file-specific UI state
+
+They may be stored separately even if both use TOML.
+
+### 12.3 Secrets storage
+
+For any future external connection support:
+
+- macOS: Keychain
+- Windows: Credential Manager
+- Linux: libsecret/gnome-keyring where available
+
+Any fallback strategy requires an ADR before implementation.
+
+### 12.4 Config versioning
+
+Config format must include a schema version or migration mechanism before the
+format is considered stable.
 
 ---
 
-## 14. ADR policy (must-have)
+## 13. Testing and quality
 
-- ADRs live at `/design/adr/` and use `0000-template.md`.
-- Follow lifecycle defined in ADR README:
-  - Accepted/superseded/deprecated, etc.
-- CI/PR checks (recommended):
-  - “ADR required?” checklist in PR template
-  - Lint for ADR filename format and required sections
+### 13.1 Minimum automated tests
+
+Unit tests:
+
+- config parsing
+- query state transitions
+- paging controller logic
+- import type inference
+- export option validation
+
+Integration tests:
+
+- open DecentDB
+- execute `SELECT 1`
+- page through a multi-page result
+- cancel a query
+- load schema metadata
+
+UI/integration tests:
+
+- open workspace
+- run query and display results
+- export CSV
+- drag-and-drop launches import flow once implemented
+
+### 13.2 Performance-sensitive checks
+
+The project should maintain reproducible scenarios for:
+
+- opening a DB with many tables
+- scrolling a large paged result set
+- exporting large result sets without UI stalls
+
+Exact performance gates may mature over time, but regressions in responsiveness
+are release-blocking.
+
+### 13.3 Validation commands
+
+When the app scaffold exists, expected validation commands are:
+
+- `flutter analyze`
+- `flutter test`
+- `flutter test integration_test`
+
+CI should run these as soon as the project becomes runnable.
 
 ---
 
-## 15. Open implementation decisions (require ADRs early)
+## 14. Packaging and distribution
 
-1. DecentDB binding strategy (C ABI vs C shim around Nim)
-2. Cursor/streaming model for results paging
-3. Excel parsing library choice (streaming support + license)
-4. SQL formatter/autocomplete engine choice (license + correctness)
-5. Parquet/Excel export libraries (license + fidelity)
-6. Computed columns evaluation: pushdown to DecentDB vs pre-import compute
+- Bundle required DecentDB native libraries with desktop builds
+- Ensure deterministic library discovery at app startup
+- Keep packaging aligned with the upstream binding strategy from ADR-0001
+- Signing/notarization and final installer formats may be staged after MVP, but
+  packaging must not require manual developer-only steps for normal app startup
 
 ---
 
-## 16. Acceptance criteria for SPEC v0.1
+## 15. ADR and document consistency rules
 
-- SPEC aligns with PRD must-haves and enumerates implementable requirements for:
-  - Drag-drop wizard entry
-  - Imports + transforms
-  - Schema browser (DecentDB-complete)
-  - Editor: autocomplete/snippets/formatter
-  - Results paging
-  - Export formats
-  - TOML config + secrets storage
-  - ADR governance
+To reduce scope drift:
+
+1. `docs/SPEC.md` is the implementation scope source of truth
+2. `docs/PRD.md` describes product intent and user value
+3. Accepted ADRs govern architectural decisions
+4. If an accepted ADR changes implementation expectations, the SPEC must be
+   updated in the same change or immediately afterward
+5. If scope changes materially, update both PRD and SPEC
+
+---
+
+## 16. Acceptance criteria
+
+### 16.1 Phase 1 acceptance
+
+A contributor can:
+
+1. launch a runnable Flutter desktop app
+2. open or create a DecentDB file
+3. see tables and columns in the schema browser
+4. run a query in a single tab
+5. receive paged results without full materialization
+6. cancel a running query and recover the UI
+7. export visible query results to CSV
+8. run analyzer and tests successfully
+
+### 16.2 MVP acceptance
+
+A user can:
+
+1. drag and drop a DecentDB file and open it
+2. drag and drop an Excel, SQLite, or supported `.sql` dump file and enter the
+   import wizard
+3. import Excel with sheet selection, headers option, and type overrides
+4. import SQLite with table selection
+5. import at least one MariaDB/MySQL-style `.sql` dump successfully
+6. rename columns and adjust target types before import
+7. inspect supported schema objects in the schema browser
+8. use multi-tab query editing with paired results panes
+9. run and cancel queries in a responsive UI
+10. use schema-aware autocomplete, snippets, and formatting
+11. export query results to CSV
+12. complete the above without noticeable UI hangs in normal desktop use
