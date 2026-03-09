@@ -1,4 +1,4 @@
-# Gridlock — Implementation Phases (Plan) v0.1
+# Decent Bench — Implementation Phases (Plan) v0.1
 _Last updated: 2026-02-27_
 
 This plan is optimized for coding agents (Copilot CLI + OpenCode/Claude Opus 4.6 + Gemini 3.1 Pro Preview) and for producing early, testable vertical slices while forcing the biggest architectural decisions into ADRs up front.
@@ -11,13 +11,13 @@ This plan is optimized for coding agents (Copilot CLI + OpenCode/Claude Opus 4.6
 ### Work items
 1. **Repository structure**
    - Add directories:
-     - `apps/gridlock/` (Flutter app)
+     - `apps/decent-bench/` (Flutter app)
      - `docs/` (PRD/SPEC)
      - `design/adr/` (ADRs)
      - `prompts/` (optional, agent prompts)
 2. **Docs**
-   - Add `docs/PRD.md` (from Gridlock_PRD_v0_4.md)
-   - Add `docs/SPEC.md` (from Gridlock_SPEC_v0_1.md)
+   - Add `docs/PRD.md` (source: Decent Bench PRD draft)
+   - Add `docs/SPEC.md` (source: Decent Bench SPEC draft)
 3. **ADRs & Templates (must-have)**
    - Add `design/adr/README.md` and `design/adr/0000-template.md`
    - Add PR template with “ADR needed?” checkbox

@@ -1,4 +1,4 @@
-# Gemini 3.1 Pro Preview Instructions — Gridlock
+# Gemini 3.1 Pro Preview Instructions — Decent Bench
 
 Use Gemini as a secondary agent for:
 - Alternative designs and trade-off analysis

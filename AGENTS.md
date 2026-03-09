@@ -1,11 +1,11 @@
-# AGENTS.md — Gridlock (Flutter) Coding Agent Instructions
+# AGENTS.md — Decent Bench (Flutter) Coding Agent Instructions
 
 > Applies to Copilot CLI, OpenCode (Claude Opus 4.6), and Gemini 3.1 Pro Preview.
 > This file is the *source of truth* for agent behavior in this repo.
 
 ## 0) What we're building
 
-Gridlock is a cross-platform Flutter desktop app that is **DecentDB-first**:
+Decent Bench is a cross-platform Flutter desktop app that is **DecentDB-first**:
 - Drag-and-drop a file
   - DecentDB file => open
   - otherwise => Import Wizard
@@ -61,10 +61,10 @@ If anything you implement risks changing product scope, record an ADR.
 - Keep it concise and decision-focused.
 
 ### 2.3 Code structure (recommended)
-- Flutter app under `/apps/gridlock/`
-- Native binding under `/apps/gridlock/native/`
-- Shared UI components in `/apps/gridlock/lib/shared/`
-- Features separated by folder in `/apps/gridlock/lib/features/`
+- Flutter app under `/apps/decent-bench/`
+- Native binding under `/apps/decent-bench/native/`
+- Shared UI components in `/apps/decent-bench/lib/shared/`
+- Features separated by folder in `/apps/decent-bench/lib/features/`
 
 ## 3) How to work (agent workflow)
 

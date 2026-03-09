@@ -1,13 +1,13 @@
-# Gridlock — Product Requirements Document (PRD) v0.1
+# Decent Bench — Product Requirements Document (PRD) v0.1
 
-**Product:** Gridlock  
+**Product:** Decent Bench  
 **Type:** Cross‑platform desktop SQL-style app (Flutter)  
 **License:** Apache 2.0  
 **Primary purpose:** Help power users **import data from common sources into DecentDB**, then **inspect schema** and **run fast SELECT-style queries** to shape/export data.
 
-**Critical initial task:** Users can **drag-and-drop a file** (Excel, SQLite, DB dumps/backups, etc.) onto Gridlock.
-- If it’s a **DecentDB** file, Gridlock opens it immediately.
-- If it’s **not** a DecentDB file, Gridlock launches an **Import Wizard** tailored to the file type.
+**Critical initial task:** Users can **drag-and-drop a file** (Excel, SQLite, DB dumps/backups, etc.) onto Decent Bench.
+- If it’s a **DecentDB** file, Decent Bench opens it immediately.
+- If it’s **not** a DecentDB file, Decent Bench launches an **Import Wizard** tailored to the file type.
 
 ---
 
@@ -15,7 +15,7 @@
 
 Power users often have data trapped in **Excel files**, **existing SQLite files**, or **other databases**. Moving that data into **DecentDB** is painful: tooling is fragmented, import paths are inconsistent, and even after import, users still need a fast way to **inspect** and **query** the data to export it in the shape they need.
 
-Gridlock solves this by being a **DecentDB-first import + query workbench**:
+Decent Bench solves this by being a **DecentDB-first import + query workbench**:
 - Import from popular sources into a **DecentDB file**
 - Quickly inspect schema and data
 - Run queries (mostly SELECT) and export results
@@ -44,7 +44,7 @@ Gridlock solves this by being a **DecentDB-first import + query workbench**:
    - Responsiveness matters: avoid UI stalls, handle large results gracefully.
 
 ### Non-goals (explicitly out of scope for MVP)
-- Managing external databases as “first-class” targets (Gridlock is **not** a DBeaver competitor for admin/ops).
+- Managing external databases as “first-class” targets (Decent Bench is **not** a DBeaver competitor for admin/ops).
 - Collaborative editing, shared connections, multi-user features.
 - Full migration tooling (schema diff, migrations framework).
 - Advanced **script orchestration** engine (e.g., run a multi-step SQL script with variables, conditional branches, loops, file IO, and pipeline-style dependencies).
@@ -96,12 +96,12 @@ Suggested measurable targets (initial, refine later):
 ## 6. User journeys (MVP)
 
 ### Journey 0: Drag-and-drop → Wizard or Open
-1. User drags a file onto Gridlock (or uses File → Open/Import).
-2. Gridlock detects:
+1. User drags a file onto Decent Bench (or uses File → Open/Import).
+2. Decent Bench detects:
    - **DecentDB file** → open in workspace.
    - **Import source** → launch Import Wizard.
 3. Wizard gathers required options, shows a preview, and runs the import into a chosen/new DecentDB file.
-4. On completion, Gridlock focuses the imported table(s) and offers “Run a query” and “Export” next steps.
+4. On completion, Decent Bench focuses the imported table(s) and offers “Run a query” and “Export” next steps.
 
 ### Journey A: Excel → DecentDB → Query → Export
 1. Create/open DecentDB file
@@ -147,13 +147,13 @@ Suggested measurable targets (initial, refine later):
   - Basic computed columns (expressions) when feasible
   - Type adjustments (always DecentDB native types; user can override)
 - App accepts drag-and-drop of local files onto the main window.
-- On drop, Gridlock performs **type detection** (by extension + lightweight signature checks where safe):
+- On drop, Decent Bench performs **type detection** (by extension + lightweight signature checks where safe):
   - DecentDB database file → open directly.
   - Excel (.xls/.xlsx) → Excel import wizard.
   - SQLite (.db/.sqlite/.sqlite3) → SQLite import wizard.
   - SQL dump files (.sql) → “SQL Dump import wizard” (initially MariaDB/MySQL-style; extensible).
   - Postgres backup (.bak/.backup/.dump/.tar/.custom) → “Postgres backup import wizard” (may be MVP-lite).
-- If the dropped file type is recognized but **not yet supported**, Gridlock still opens the wizard and clearly shows:
+- If the dropped file type is recognized but **not yet supported**, Decent Bench still opens the wizard and clearly shows:
   - “Not supported in this version”
   - What *is* supported today
   - A link/button to track the feature (issue/roadmap) and suggested workaround.
@@ -252,18 +252,18 @@ Suggested measurable targets (initial, refine later):
 
 ## 8.1 DecentDB engine integration (binding strategy)
 
-Gridlock must speak to DecentDB with **best compatibility and performance**. Flutter does not provide a built-in database “driver” layer; database access is done via packages, platform channels, or **Dart FFI** to native libraries.
+Decent Bench must speak to DecentDB with **best compatibility and performance**. Flutter does not provide a built-in database “driver” layer; database access is done via packages, platform channels, or **Dart FFI** to native libraries.
 
 **MVP approach:** Provide a **Dart/Flutter binding** to DecentDB using Dart FFI.
 - Prefer a stable, C-compatible surface (either an existing C ABI from DecentDB, or a thin C shim around the Nim API).
 - Generate Dart bindings with `ffigen` and ship platform-specific dynamic libraries with the desktop builds.
-- Keep the binding small and focused on Gridlock needs: open/close DB, exec SQL, streaming/pagination, cancellation (if supported), and schema introspection.
+- Keep the binding small and focused on Decent Bench needs: open/close DB, exec SQL, streaming/pagination, cancellation (if supported), and schema introspection.
 
 **Why:** The Nim API is the canonical embedded API today, but Flutter/Dart needs a native bridge to call it efficiently.
 
 ## 8.2 Engineering governance: ADRs (must-have)
 
-Gridlock will maintain **Architecture Decision Records (ADRs)** from day one. Any decision with meaningful trade-offs, long-term impact, or compatibility implications must be captured as an ADR.
+Decent Bench will maintain **Architecture Decision Records (ADRs)** from day one. Any decision with meaningful trade-offs, long-term impact, or compatibility implications must be captured as an ADR.
 
 ### ADR requirements (MVP)
 - Repository contains `design/adr/` with:
@@ -345,7 +345,7 @@ Use the standard sections:
 ## 11. Acceptance criteria (MVP “definition of done”)
 
 A user can:
-1. **Drag-and-drop** a file onto Gridlock and:
+1. **Drag-and-drop** a file onto Decent Bench and:
    - If it’s a DecentDB file, it opens.
    - If it’s not a DecentDB file, an **Import Wizard** appears.
 2. Create a new DecentDB file (from the wizard or File → New).

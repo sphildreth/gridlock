@@ -1,4 +1,4 @@
-# Copilot CLI Instructions — Gridlock
+# Copilot CLI Instructions — Decent Bench
 
 Use Copilot CLI for fast incremental coding tasks and refactors.
 

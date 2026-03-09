@@ -1,4 +1,4 @@
-# Reviewer Prompt — Gridlock (use with any agent)
+# Reviewer Prompt — Decent Bench (use with any agent)
 
 Review the proposed change for:
 - PRD/SPEC alignment (no scope drift)

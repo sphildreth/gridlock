@@ -1,16 +1,16 @@
-# Gridlock — Product Specification (SPEC) v0.1
+# Decent Bench — Product Specification (SPEC) v0.1
 
-**Product:** Gridlock  
+**Product:** Decent Bench  
 **Type:** Cross‑platform desktop SQL-style app (Flutter)  
 **License:** Apache 2.0  
 **Primary purpose:** Drag‑and‑drop import into **DecentDB**, then inspect schema, run fast queries, and export shaped results.  
-**PRD reference:** Gridlock_PRD_v0_4.md
+**PRD reference:** docs/PRD.md
 
 ---
 
 ## 0. Terminology
 
-- **DecentDB**: The target embedded database format used by Gridlock workspaces.
+- **DecentDB**: The target embedded database format used by Decent Bench workspaces.
 - **Import source**: A file or external database used only as input to create/load data into DecentDB.
 - **Wizard**: The guided flow launched on drag‑and‑drop of a non‑DecentDB file to configure import.
 - **Workspace**: An open DecentDB file plus UI state (tabs, saved queries, etc.).
@@ -69,7 +69,7 @@
 
 ## 2. Product architecture (high level)
 
-Gridlock is composed of:
+Decent Bench is composed of:
 1. **UI shell (Flutter)** — windowing, navigation, tabs, dialogs/wizards
 2. **DecentDB Engine Binding (Dart FFI)** — open/exec/query/stream/introspect/cancel
 3. **Import pipeline** — parsers/connectors + transform planner + bulk load into DecentDB
@@ -83,7 +83,7 @@ Gridlock is composed of:
 ## 3. Repository layout (proposed)
 
 ```
-/apps/gridlock/                    # Flutter desktop app
+/apps/decent-bench/                    # Flutter desktop app
   /lib/
     /app/                          # app shell, routing, theming
     /features/
@@ -187,7 +187,7 @@ Wizard is a multi-step flow with a consistent scaffold:
 ## 5. DecentDB integration (Dart FFI binding)
 
 ### 5.1 Principle
-Gridlock’s core functionality depends on best-in-class compatibility and performance with DecentDB. The primary approach is **Dart FFI** to native libraries.
+Decent Bench’s core functionality depends on best-in-class compatibility and performance with DecentDB. The primary approach is **Dart FFI** to native libraries.
 
 ### 5.2 Binding strategy options (ADR required)
 - **Option A: Native C ABI from DecentDB**

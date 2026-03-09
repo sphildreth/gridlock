@@ -2,11 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-02-27
-- **Decision owners:** Gridlock maintainers
+- **Decision owners:** Decent Bench maintainers
 - **Related:** PRD/SPEC (DecentDB-first + performance + cross-platform desktop)
 
 ## Decision
-Use **DecentDB’s official Dart FFI bindings** as the *only* supported integration mechanism between Gridlock (Flutter) and DecentDB.
+Use **DecentDB’s official Dart FFI bindings** as the *only* supported integration mechanism between Decent Bench (Flutter) and DecentDB.
 
 Source of truth:
 - Upstream-provided bindings can be downloaded from the DecentDB releases page.
@@ -41,7 +41,7 @@ We will not build or maintain a custom C shim or any alternative binding layer u
 
 ## Implementation notes (non-normative)
 ### Binding API surface
-Gridlock will use the API exposed by the upstream DecentDB Dart bindings. If any required capability is missing (paging/streaming contract, cancellation, structured errors), we will first attempt to upstream changes rather than introducing a local shim.
+Decent Bench will use the API exposed by the upstream DecentDB Dart bindings. If any required capability is missing (paging/streaming contract, cancellation, structured errors), we will first attempt to upstream changes rather than introducing a local shim.
 
 ### Packaging
 - Bundle dynamic libraries with desktop apps:

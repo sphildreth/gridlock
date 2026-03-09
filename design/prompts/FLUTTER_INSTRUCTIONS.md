@@ -1,4 +1,4 @@
-# Flutter Instructions — Gridlock
+# Flutter Instructions — Decent Bench
 
 ## Goals
 - Desktop-first Flutter app (Windows/macOS/Linux)

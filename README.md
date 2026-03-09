@@ -1,8 +1,8 @@
-# Gridlock
+# Decent Bench
 
 > The GUI for DecentDB — Because perfection is overrated.
 
-Gridlock is a cross-platform desktop app (Flutter) that helps power users
+Decent Bench is a cross-platform desktop app (Flutter) that helps power users
 **import data into DecentDB**, **inspect schema**, run fast **SELECT-style
 queries**, and **export shaped results**.
 
@@ -10,7 +10,7 @@ queries**, and **export shaped results**.
 
 **Pre-alpha / docs-first.** Today this repository contains the product
 requirements/specification and initial ADRs. The Flutter app folder exists
-under `apps/gridlock/`, but it is currently a placeholder (no runnable Flutter
+under `apps/decent-bench/`, but it is currently a placeholder (no runnable Flutter
 project scaffold yet).
 
 - Product docs: `docs/PRD.md`, `docs/SPEC.md`
@@ -23,7 +23,7 @@ Flutter + native binding scaffold.
 
 ## Goals (MVP)
 
-From the PRD/SPEC, Gridlock’s MVP targets:
+From the PRD/SPEC, Decent Bench’s MVP targets:
 
 - Drag-and-drop a file:
 	- DecentDB file → open
@@ -38,7 +38,7 @@ From the PRD/SPEC, Gridlock’s MVP targets:
 ## Repository layout
 
 ```
-apps/gridlock/          Flutter desktop app (placeholder today)
+apps/decent-bench/          Flutter desktop app (placeholder today)
 docs/                   Product docs (PRD, SPEC)
 design/adr/             Architecture Decision Records
 design/IMPLEMENTATION_PHASES.md
@@ -53,7 +53,7 @@ LICENSE
 - Flutter (stable) with desktop tooling enabled for your OS
 - Git
 
-> Note: until the Flutter project scaffold lands in `apps/gridlock/`, you won’t
+> Note: until the Flutter project scaffold lands in `apps/decent-bench/`, you won’t
 > be able to run `flutter pub get`, `flutter analyze`, or `flutter test`.
 
 ### Read first
@@ -72,7 +72,7 @@ contract, import type mapping, exporter libraries, etc.).
 
 ### Development workflow (once app scaffold exists)
 
-From `apps/gridlock/`:
+From `apps/decent-bench/`:
 
 ```bash
 flutter --version
@@ -96,7 +96,7 @@ welcome in:
 
 - Tightening up `docs/SPEC.md` into clear, testable requirements
 - Writing/accepting ADRs in `design/adr/`
-- Adding the initial Flutter project scaffold under `apps/gridlock/`
+- Adding the initial Flutter project scaffold under `apps/decent-bench/`
 - Adding CI that runs `flutter analyze` + `flutter test`
 
 When submitting code changes:
@@ -108,7 +108,7 @@ When submitting code changes:
 
 ## License
 
-Gridlock is licensed under the Apache License 2.0. See `LICENSE`.
+Decent Bench is licensed under the Apache License 2.0. See `LICENSE`.
 
 ## Third-party notices
 

@@ -2,11 +2,11 @@
 
 - **Status:** Proposed
 - **Date:** 2026-02-27
-- **Decision owners:** Gridlock maintainers
+- **Decision owners:** Decent Bench maintainers
 - **Related:** ADR-0001 (binding strategy), SPEC (results grid + paging)
 
 ## Decision
-Gridlock will use a **cursor-based paging/streaming** model for query results:
+Decent Bench will use a **cursor-based paging/streaming** model for query results:
 
 - Opening a query returns a **cursor handle**.
 - The UI fetches results in **pages** (batches) of rows.
