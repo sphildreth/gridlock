@@ -15,15 +15,15 @@ yet a runnable Flutter project scaffold**.
 
 Current source-of-truth documents:
 
-- Product requirements: `docs/PRD.md`
-- Product specification: `docs/SPEC.md`
+- Product requirements: `design/PRD.md`
+- Product specification: `design/SPEC.md`
 - Engineering plan: `design/IMPLEMENTATION_PHASES.md`
 - Architecture decisions: `design/adr/`
 - Repo workflow and constraints: `AGENTS.md`
 
 If you want to contribute right now, the highest-value work is usually:
 
-- tightening MVP requirements in `docs/SPEC.md`
+- tightening MVP requirements in `design/SPEC.md`
 - creating or refining ADRs in `design/adr/`
 - landing the first runnable Flutter + DecentDB scaffold
 - adding CI for `flutter analyze` and `flutter test`
@@ -78,7 +78,7 @@ The current MVP is intentionally narrower than the long-term product vision.
 
 ```text
 apps/decent-bench/              Flutter desktop app (placeholder today)
-docs/                           Product docs (PRD, SPEC)
+design/                         Product docs (PRD, SPEC)
 design/adr/                     Architecture Decision Records
 design/IMPLEMENTATION_PHASES.md Delivery sequencing and milestones
 THIRD_PARTY_NOTICES.md          Third-party attribution tracking
@@ -100,7 +100,7 @@ At a high level, Decent Bench is expected to consist of:
 
 See:
 
-- `docs/SPEC.md` for behavior and structure
+- `design/SPEC.md` for behavior and structure
 - `design/adr/0001-decentdb-flutter-binding-strategy.md`
 - `design/adr/0002-results-paging-and-streaming-contract.md`
 
@@ -117,8 +117,8 @@ See:
 
 ### Read first
 
-1. `docs/PRD.md` — what we are building and why
-2. `docs/SPEC.md` — implementable behavior and scope
+1. `design/PRD.md` — what we are building and why
+2. `design/SPEC.md` — implementable behavior and scope
 3. `design/IMPLEMENTATION_PHASES.md` — sequencing and near-term milestones
 4. `AGENTS.md` — repo rules, especially performance and scope control
 
@@ -164,8 +164,8 @@ flutter run -d windows
 Until the first runnable app scaffold is merged, contributions are especially
 welcome in:
 
-- clarifying MVP behavior in `docs/SPEC.md`
-- aligning `docs/PRD.md` and `docs/SPEC.md`
+- clarifying MVP behavior in `design/SPEC.md`
+- aligning `design/PRD.md` and `design/SPEC.md`
 - writing and accepting ADRs
 - adding the initial Flutter project scaffold
 - adding CI that runs analysis and tests
