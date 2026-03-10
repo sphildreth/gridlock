@@ -60,7 +60,8 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
                   const SizedBox(height: 12),
                 ],
                 if (session.warnings.isNotEmpty &&
-                    session.step != SqlDumpImportWizardStep.summary) ...<Widget>[
+                    session.step !=
+                        SqlDumpImportWizardStep.summary) ...<Widget>[
                   _DialogBanner(
                     color: Theme.of(context).colorScheme.tertiaryContainer,
                     icon: Icons.warning_amber_rounded,
@@ -170,9 +171,7 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
                           widget.controller.updateSqlDumpImportEncoding(value);
                         }
                       },
-                decoration: const InputDecoration(
-                  labelText: 'Decode dump as',
-                ),
+                decoration: const InputDecoration(labelText: 'Decode dump as'),
               ),
             ),
             const SizedBox(width: 12),
@@ -337,11 +336,8 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
                   TextFormField(
                     key: ValueKey<String>('table-${focused.sourceName}'),
                     initialValue: focused.targetName,
-                    onChanged: (value) =>
-                        widget.controller.renameSqlDumpImportTable(
-                          focused.sourceName,
-                          value,
-                        ),
+                    onChanged: (value) => widget.controller
+                        .renameSqlDumpImportTable(focused.sourceName, value),
                     decoration: const InputDecoration(
                       labelText: 'Target table name',
                     ),
@@ -450,7 +446,10 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
             ],
           ),
           const SizedBox(height: 16),
-          Text('Imported tables', style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            'Imported tables',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           const SizedBox(height: 8),
           if (summary.importedTables.isEmpty)
             const Text('No tables were imported.')
@@ -503,19 +502,19 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
             value: table.selected,
             onChanged: table.columns.isEmpty
                 ? null
-                : (value) => widget.controller.toggleSqlDumpImportTableSelection(
-                    table.sourceName,
-                    value ?? false,
-                  ),
+                : (value) =>
+                      widget.controller.toggleSqlDumpImportTableSelection(
+                        table.sourceName,
+                        value ?? false,
+                      ),
             title: Text(table.sourceName),
             subtitle: Text(
               '${table.rowCount} rows | ${table.columns.length} columns',
             ),
             secondary: IconButton(
               tooltip: 'Focus parsed table details',
-              onPressed: () => widget.controller.focusSqlDumpImportTable(
-                table.sourceName,
-              ),
+              onPressed: () =>
+                  widget.controller.focusSqlDumpImportTable(table.sourceName),
               icon: Icon(
                 session.focusedTable == table.sourceName
                     ? Icons.visibility_rounded
@@ -706,7 +705,8 @@ class _SqlDumpImportDialogState extends State<SqlDumpImportDialog> {
           actions.add(
             TextButton(
               onPressed: () async {
-                await widget.controller.openSqlDumpImportedDatabaseFromSummary();
+                await widget.controller
+                    .openSqlDumpImportedDatabaseFromSummary();
                 if (context.mounted) {
                   Navigator.of(context).pop();
                 }

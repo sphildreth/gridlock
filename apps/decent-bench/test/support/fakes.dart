@@ -8,6 +8,7 @@ import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_state.dart';
 import 'package:decent_bench/features/workspace/infrastructure/app_config_store.dart';
+import 'package:decent_bench/features/workspace/infrastructure/app_lifecycle_service.dart';
 import 'package:decent_bench/features/workspace/infrastructure/decentdb_bridge.dart';
 import 'package:decent_bench/features/workspace/infrastructure/workspace_state_store.dart';
 
@@ -43,6 +44,15 @@ class InMemoryWorkspaceStateStore implements WorkspaceStateStore {
   @override
   Future<void> save(String databasePath, PersistedWorkspaceState state) async {
     _states[databasePath] = state;
+  }
+}
+
+class FakeAppLifecycleService implements AppLifecycleService {
+  bool requestedExit = false;
+
+  @override
+  Future<void> requestExit() async {
+    requestedExit = true;
   }
 }
 

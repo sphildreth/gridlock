@@ -1,207 +1,297 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
-import '../../../shared/widgets/panel_card.dart';
+import '../application/menu_command_registry.dart';
 import '../application/workspace_controller.dart';
+import '../application/workspace_shell_controller.dart';
 import '../domain/app_config.dart';
 import '../domain/sql_autocomplete.dart';
 import '../domain/sql_formatter.dart';
 import '../domain/workspace_file_entry.dart';
 import '../domain/workspace_models.dart';
+import '../infrastructure/app_lifecycle_service.dart';
+import '../infrastructure/shortcut_config_service.dart';
 import 'excel_import_dialog.dart';
+import 'shell/app_menu_bar.dart';
+import 'shell/command_toolbar.dart';
+import 'shell/properties_pane.dart';
+import 'shell/results_pane.dart';
+import 'shell/schema_explorer_pane.dart';
+import 'shell/sql_editor_pane.dart';
+import 'shell/status_bar.dart';
+import 'shell/workspace_layout_shell.dart';
 import 'sql_dump_import_dialog.dart';
 import 'sqlite_import_dialog.dart';
 
 class WorkspaceScreen extends StatefulWidget {
-  const WorkspaceScreen({super.key, required this.controller});
+  const WorkspaceScreen({
+    super.key,
+    required this.controller,
+    this.appLifecycleService = const FlutterAppLifecycleService(),
+  });
 
   final WorkspaceController controller;
+  final AppLifecycleService appLifecycleService;
 
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
 }
 
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
-  late final TextEditingController _dbPathController = TextEditingController();
-  late final TextEditingController _schemaFilterController =
-      TextEditingController();
+  static const _decentDbTypeGroup = XTypeGroup(
+    label: 'DecentDB',
+    extensions: <String>['ddb'],
+  );
+
   late final TextEditingController _sqlController = TextEditingController();
   late final TextEditingController _paramsController = TextEditingController();
-  late final TextEditingController _pageSizeController =
+  late final TextEditingController _exportPathController =
       TextEditingController();
   late final TextEditingController _delimiterController =
       TextEditingController();
-  late final TextEditingController _exportPathController =
-      TextEditingController();
-  late final ScrollController _resultsScrollController = ScrollController()
+  late final FocusNode _sqlFocusNode = FocusNode(debugLabel: 'sql-editor')
+    ..addListener(_handleFocusChanged);
+  late final FocusNode _resultsFocusNode = FocusNode(debugLabel: 'results')
+    ..addListener(_handleFocusChanged);
+  late final ScrollController _resultsVerticalController = ScrollController()
     ..addListener(_onResultsScroll);
   late final ScrollController _resultsHorizontalController = ScrollController();
-  late final FocusNode _sqlFocusNode = FocusNode(debugLabel: 'sql-editor');
-  late final FocusNode _resultsFocusNode = FocusNode(debugLabel: 'results');
+  late final ScrollController _editorScrollController = ScrollController();
+  late final WorkspaceShellController _shellController =
+      WorkspaceShellController(
+        initialPreferences: widget.controller.config.shellPreferences,
+        onPersist: (preferences, {statusMessage}) {
+          return widget.controller.updateShellPreferences(
+            preferences,
+            statusMessage: statusMessage,
+          );
+        },
+      );
+  final ShortcutConfigService _shortcutConfigService =
+      const ShortcutConfigService();
   final SqlAutocompleteEngine _autocompleteEngine =
       const SqlAutocompleteEngine();
   final SqlFormatter _sqlFormatter = const SqlFormatter();
 
-  String? _selectedSchemaObjectName;
-  String? _syncedTabId;
+  bool _didHydrateShellPreferences = false;
   bool _isDropTargetActive = false;
+  String? _selectedSchemaObjectName;
 
   @override
   void dispose() {
+    unawaited(_shellController.persistNow());
+    _shellController.dispose();
+    _editorScrollController.dispose();
     _resultsHorizontalController.dispose();
-    _resultsScrollController
+    _resultsVerticalController
       ..removeListener(_onResultsScroll)
       ..dispose();
-    _resultsFocusNode.dispose();
-    _sqlFocusNode.dispose();
-    _exportPathController.dispose();
+    _sqlFocusNode
+      ..removeListener(_handleFocusChanged)
+      ..dispose();
+    _resultsFocusNode
+      ..removeListener(_handleFocusChanged)
+      ..dispose();
     _delimiterController.dispose();
-    _pageSizeController.dispose();
+    _exportPathController.dispose();
     _paramsController.dispose();
     _sqlController.dispose();
-    _schemaFilterController.dispose();
-    _dbPathController.dispose();
     super.dispose();
   }
 
+  void _handleFocusChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _onResultsScroll() {
-    final controller = widget.controller;
-    final tab = controller.tabById(controller.activeTabId);
-    if (tab == null ||
-        !_resultsScrollController.hasClients ||
-        !tab.hasMoreRows ||
-        tab.phase == QueryPhase.fetching) {
+    if (!_resultsVerticalController.hasClients) {
       return;
     }
-    final threshold = _resultsScrollController.position.maxScrollExtent - 320;
-    if (_resultsScrollController.position.pixels >= threshold) {
-      controller.fetchNextPage(tabId: tab.id);
+    final tab = widget.controller.activeTab;
+    if (!tab.hasMoreRows || tab.phase == QueryPhase.fetching) {
+      return;
+    }
+    final threshold = _resultsVerticalController.position.maxScrollExtent - 240;
+    if (_resultsVerticalController.position.pixels >= threshold) {
+      widget.controller.fetchNextPage(tabId: tab.id);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge(<Listenable>[
+        widget.controller,
+        _shellController,
+      ]),
       builder: (context, _) {
         final controller = widget.controller;
-        _syncFormFields(controller);
-        final filteredObjects = controller.filterSchemaObjects(
-          _schemaFilterController.text,
-        );
-        final selectedObject = _selectedObjectFor(filteredObjects);
+        _hydrateShellPreferencesIfReady(controller);
+        final activeTab = controller.activeTab;
+        _syncControllers(controller, activeTab);
+
+        final selectedObject = _selectedObject(controller);
+        final shortcuts = _shortcutConfigService.load(controller.config);
+        final registry = _buildMenuCommandRegistry(controller, shortcuts);
         final autocompleteResult = _autocompleteFor(controller);
+        final shellPreferences = _shellController.preferences;
 
         return DropTarget(
           enable: !controller.hasImportSession,
-          onDragEntered: (_) {
-            setState(() {
-              _isDropTargetActive = true;
-            });
-          },
-          onDragExited: (_) {
-            setState(() {
-              _isDropTargetActive = false;
-            });
-          },
+          onDragEntered: (_) => setState(() => _isDropTargetActive = true),
+          onDragExited: (_) => setState(() => _isDropTargetActive = false),
           onDragDone: (details) async {
-            setState(() {
-              _isDropTargetActive = false;
-            });
+            setState(() => _isDropTargetActive = false);
             await _handleIncomingFiles(details.files.map((file) => file.path));
           },
           child: Shortcuts(
-            shortcuts: const <ShortcutActivator, Intent>{
-              SingleActivator(LogicalKeyboardKey.enter, control: true):
-                  _RunQueryIntent(),
-              SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                  _RunQueryIntent(),
-              SingleActivator(LogicalKeyboardKey.keyT, control: true):
-                  _NewTabIntent(),
-              SingleActivator(LogicalKeyboardKey.keyT, meta: true):
-                  _NewTabIntent(),
-              SingleActivator(LogicalKeyboardKey.tab, control: true):
-                  _NextTabIntent(),
-              SingleActivator(LogicalKeyboardKey.tab, meta: true):
-                  _NextTabIntent(),
-              SingleActivator(
-                LogicalKeyboardKey.tab,
-                control: true,
-                shift: true,
-              ): _PreviousTabIntent(),
-              SingleActivator(LogicalKeyboardKey.tab, meta: true, shift: true):
-                  _PreviousTabIntent(),
-            },
+            shortcuts: registry.buildShortcutMap(),
             child: Actions(
               actions: <Type, Action<Intent>>{
-                _RunQueryIntent: CallbackAction<_RunQueryIntent>(
-                  onInvoke: (_) => controller.runActiveTab(),
-                ),
-                _NewTabIntent: CallbackAction<_NewTabIntent>(
-                  onInvoke: (_) => controller.createTab(),
-                ),
-                _NextTabIntent: CallbackAction<_NextTabIntent>(
-                  onInvoke: (_) => controller.nextTab(),
-                ),
-                _PreviousTabIntent: CallbackAction<_PreviousTabIntent>(
-                  onInvoke: (_) => controller.previousTab(),
+                MenuCommandIntent: CallbackAction<MenuCommandIntent>(
+                  onInvoke: (intent) => registry.invoke(intent.commandId),
                 ),
               },
               child: Scaffold(
                 body: SafeArea(
                   child: Stack(
                     children: <Widget>[
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          children: <Widget>[
-                            _Header(controller: controller),
-                            const SizedBox(height: 20),
-                            Expanded(
-                              child: _WorkspaceBody(
-                                sidebar: Column(
-                                  children: <Widget>[
-                                    Expanded(child: _buildConnectionPane()),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      flex: 2,
-                                      child: _buildSchemaPane(
-                                        controller: controller,
-                                        filteredObjects: filteredObjects,
-                                        selectedObject: selectedObject,
-                                      ),
-                                    ),
-                                  ],
+                      Column(
+                        children: <Widget>[
+                          AppMenuBar(
+                            registry: registry,
+                            recentFiles: controller.config.recentFiles,
+                            onOpenRecent: _openRecentWorkspace,
+                          ),
+                          CommandToolbar(registry: registry),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: WorkspaceLayoutShell(
+                                controller: _shellController,
+                                schemaExplorer: SchemaExplorerPane(
+                                  schema: controller.schema,
+                                  databasePath: controller.databasePath,
+                                  selectedObjectName: _selectedSchemaObjectName,
+                                  onSelectObject: (name) {
+                                    setState(() {
+                                      _selectedSchemaObjectName = name;
+                                    });
+                                  },
+                                  onRefresh: () {
+                                    controller.refreshSchema();
+                                  },
+                                  isLoading:
+                                      controller.isSchemaLoading ||
+                                      controller.isOpeningDatabase,
                                 ),
-                                workbench: Column(
-                                  children: <Widget>[
-                                    Expanded(
-                                      flex: 4,
-                                      child: _buildSqlPane(
-                                        controller.activeTab,
+                                propertiesPane: PropertiesPane(
+                                  object: selectedObject,
+                                  relatedIndexes: selectedObject == null
+                                      ? const <IndexSummary>[]
+                                      : controller.schema.indexesForObject(
+                                          selectedObject.name,
+                                        ),
+                                  notes: selectedObject == null
+                                      ? _defaultInspectorNotes(controller)
+                                      : controller.schemaNotesForObject(
+                                          selectedObject,
+                                        ),
+                                ),
+                                sqlEditor: SqlEditorPane(
+                                  tabs: controller.tabs,
+                                  activeTab: activeTab,
+                                  sqlController: _sqlController,
+                                  paramsController: _paramsController,
+                                  editorScrollController:
+                                      _editorScrollController,
+                                  focusNode: _sqlFocusNode,
+                                  autocompleteResult: autocompleteResult,
+                                  snippets: controller.config.snippets,
+                                  zoomFactor: shellPreferences.editorZoom,
+                                  onSqlChanged: controller.updateActiveSql,
+                                  onParamsChanged:
+                                      controller.updateActiveParameterJson,
+                                  onSelectTab: controller.selectTab,
+                                  onCloseTab: controller.closeTab,
+                                  onNewTab: () => controller.createTab(),
+                                  onRunQuery: () {
+                                    controller.runActiveTab();
+                                  },
+                                  onStopQuery: () {
+                                    controller.cancelActiveQuery();
+                                  },
+                                  onFormatSql: _formatActiveSql,
+                                  onInsertSnippet: _insertSnippet,
+                                  onManageSnippets: () {
+                                    _showSnippetBrowser();
+                                  },
+                                  onApplyAutocomplete: (suggestion) =>
+                                      _applyAutocompleteSuggestion(
                                         autocompleteResult,
+                                        suggestion,
                                       ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      flex: 5,
-                                      child: _buildResultsPane(
-                                        controller.activeTab,
-                                      ),
-                                    ),
-                                  ],
+                                  canRun: controller.canRunActiveTab,
+                                  canStop: controller.canCancelActiveTab,
+                                ),
+                                resultsPane: Focus(
+                                  focusNode: _resultsFocusNode,
+                                  child: ResultsPane(
+                                    activeTab: activeTab,
+                                    activeResultsTab:
+                                        shellPreferences.activeResultsTab,
+                                    exportPathController: _exportPathController,
+                                    delimiterController: _delimiterController,
+                                    verticalScrollController:
+                                        _resultsVerticalController,
+                                    horizontalScrollController:
+                                        _resultsHorizontalController,
+                                    csvIncludeHeaders:
+                                        controller.config.csvIncludeHeaders,
+                                    onResultsTabChanged:
+                                        _shellController.setActiveResultsTab,
+                                    onExportPathChanged:
+                                        controller.updateActiveExportPath,
+                                    onDelimiterSubmitted:
+                                        controller.updateCsvDelimiter,
+                                    onHeadersChanged: (value) {
+                                      controller.updateCsvIncludeHeaders(value);
+                                    },
+                                    onExportCsv: () {
+                                      controller.exportCurrentQuery();
+                                    },
+                                    onLoadNextPage: () {
+                                      controller.fetchNextPage();
+                                    },
+                                  ),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                          if (shellPreferences.showStatusBar)
+                            StatusBar(
+                              statusMessage:
+                                  controller.workspaceError ??
+                                  controller.workspaceMessage ??
+                                  'Ready',
+                              workspaceLabel:
+                                  'Workspace: ${controller.databasePath == null ? 'sample.decentdb' : p.basename(controller.databasePath!)}',
+                              lastExecutionLabel:
+                                  'Last execution: ${activeTab.elapsed?.inMilliseconds ?? 142} ms',
+                              rowsLabel:
+                                  'Rows: ${activeTab.resultRows.isNotEmpty ? activeTab.resultRows.length : activeTab.rowsAffected ?? 250}',
+                              editorModeLabel: _editorModeLabel(),
+                            ),
+                        ],
                       ),
-                      if (_isDropTargetActive)
-                        const Positioned.fill(child: _DropOverlay()),
+                      if (_isDropTargetActive) const _DropOverlay(),
                     ],
                   ),
                 ),
@@ -213,12 +303,500 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  void _hydrateShellPreferencesIfReady(WorkspaceController controller) {
+    if (_didHydrateShellPreferences || controller.isInitializing) {
+      return;
+    }
+    _shellController.replacePreferences(controller.config.shellPreferences);
+    _didHydrateShellPreferences = true;
+  }
+
+  void _syncControllers(
+    WorkspaceController controller,
+    QueryTabState activeTab,
+  ) {
+    _syncTextController(_sqlController, activeTab.sql);
+    _syncTextController(_paramsController, activeTab.parameterJson);
+    _syncTextController(_exportPathController, activeTab.exportPath);
+    _syncTextController(_delimiterController, controller.config.csvDelimiter);
+  }
+
+  void _syncTextController(TextEditingController controller, String value) {
+    if (controller.text == value) {
+      return;
+    }
+    final offset = math.min(value.length, controller.selection.baseOffset);
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: math.max(offset, 0)),
+    );
+  }
+
+  SchemaObjectSummary? _selectedObject(WorkspaceController controller) {
+    if (_selectedSchemaObjectName != null) {
+      final selected = controller.schema.objectNamed(
+        _selectedSchemaObjectName!,
+      );
+      if (selected != null) {
+        return selected;
+      }
+    }
+    final fallback = controller.schema.objects.isNotEmpty
+        ? controller.schema.objects.first
+        : null;
+    _selectedSchemaObjectName ??= fallback?.name;
+    return fallback;
+  }
+
+  List<String> _defaultInspectorNotes(WorkspaceController controller) {
+    if (controller.databasePath != null) {
+      return const <String>[
+        'Select an object in Schema Explorer to inspect columns, indexes, and DDL.',
+      ];
+    }
+    return const <String>[
+      'No database is open yet. The shell is showing realistic placeholders so layout and density can be evaluated.',
+    ];
+  }
+
+  String _editorModeLabel() {
+    if (_resultsFocusNode.hasFocus) {
+      return 'Grid mode';
+    }
+    if (_sqlFocusNode.hasFocus) {
+      return 'Editor mode';
+    }
+    return 'Ready mode';
+  }
+
+  AutocompleteResult _autocompleteFor(WorkspaceController controller) {
+    final selection = _sqlController.selection;
+    final offset = selection.isValid && selection.baseOffset >= 0
+        ? selection.baseOffset
+        : _sqlController.text.length;
+    return _autocompleteEngine.suggest(
+      sql: _sqlController.text,
+      cursorOffset: offset,
+      schema: controller.schema,
+      config: controller.config,
+    );
+  }
+
+  MenuCommandRegistry _buildMenuCommandRegistry(
+    WorkspaceController controller,
+    Map<String, ShortcutBinding> shortcuts,
+  ) {
+    MenuCommand command({
+      required String id,
+      required String label,
+      required IconData icon,
+      required Future<void> Function() onInvoke,
+      bool enabled = true,
+      bool checked = false,
+    }) {
+      return MenuCommand(
+        id: id,
+        label: label,
+        icon: icon,
+        enabled: enabled,
+        checked: checked,
+        shortcut: shortcuts[id],
+        onInvoke: onInvoke,
+      );
+    }
+
+    final prefs = _shellController.preferences;
+    return MenuCommandRegistry(
+      commands: <MenuCommand>[
+        command(
+          id: 'file_new',
+          label: 'New',
+          icon: Icons.note_add_outlined,
+          onInvoke: _createNewWorkspace,
+        ),
+        command(
+          id: 'file_open',
+          label: 'Open...',
+          icon: Icons.folder_open_outlined,
+          onInvoke: _openWorkspace,
+        ),
+        command(
+          id: 'file_save',
+          label: 'Save',
+          icon: Icons.save_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Save',
+            'Workspace state already persists automatically. Database save commands will be wired when file lifecycle behavior is defined.',
+          ),
+        ),
+        command(
+          id: 'file_save_as',
+          label: 'Save As...',
+          icon: Icons.save_as_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Save As',
+            'Database duplication is not wired in this shell proof yet.',
+          ),
+        ),
+        command(
+          id: 'file_close',
+          label: 'Close',
+          icon: Icons.close_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Close Workspace',
+            'Open another workspace or use Exit. Close semantics are still being defined.',
+          ),
+        ),
+        command(
+          id: 'file_exit',
+          label: 'Exit',
+          icon: Icons.power_settings_new_outlined,
+          onInvoke: widget.appLifecycleService.requestExit,
+        ),
+        command(
+          id: 'edit_undo',
+          label: 'Undo',
+          icon: Icons.undo_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Undo',
+            'Editor undo/redo remains delegated to the native text field for now.',
+          ),
+        ),
+        command(
+          id: 'edit_redo',
+          label: 'Redo',
+          icon: Icons.redo_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Redo',
+            'Editor undo/redo remains delegated to the native text field for now.',
+          ),
+        ),
+        command(
+          id: 'edit_cut',
+          label: 'Cut',
+          icon: Icons.content_cut_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Cut',
+            'Text editing context commands will be bound per focused field in a later pass.',
+          ),
+        ),
+        command(
+          id: 'edit_copy',
+          label: 'Copy',
+          icon: Icons.copy_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Copy',
+            'Text editing context commands will be bound per focused field in a later pass.',
+          ),
+        ),
+        command(
+          id: 'edit_paste',
+          label: 'Paste',
+          icon: Icons.content_paste_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Paste',
+            'Text editing context commands will be bound per focused field in a later pass.',
+          ),
+        ),
+        command(
+          id: 'edit_find',
+          label: 'Find',
+          icon: Icons.search_outlined,
+          onInvoke: () async {
+            _sqlFocusNode.requestFocus();
+            await _showPlaceholderNotice(
+              'Find',
+              'The editor is focused. Inline find UI is a follow-up command surface.',
+            );
+          },
+        ),
+        command(
+          id: 'edit_find_next',
+          label: 'Find Next',
+          icon: Icons.find_replace_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Find Next',
+            'Find navigation will be added once inline find state exists.',
+          ),
+        ),
+        command(
+          id: 'edit_select_all',
+          label: 'Select All',
+          icon: Icons.select_all_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Select All',
+            'Select-all will follow the focused editor/result surface in a later pass.',
+          ),
+        ),
+        command(
+          id: 'import_excel',
+          label: 'Import Excel...',
+          icon: Icons.table_chart_outlined,
+          onInvoke: _showExcelImportDialog,
+        ),
+        command(
+          id: 'import_sqlite',
+          label: 'Import SQLite...',
+          icon: Icons.storage_outlined,
+          onInvoke: _showSqliteImportDialog,
+        ),
+        command(
+          id: 'import_sql_dump',
+          label: 'Import SQL Dump...',
+          icon: Icons.description_outlined,
+          onInvoke: _showSqlDumpImportDialog,
+        ),
+        command(
+          id: 'import_from_database',
+          label: 'Import From Database...',
+          icon: Icons.cloud_sync_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Import From Database',
+            'External live database imports are represented in the shell but not wired in this proof.',
+          ),
+        ),
+        command(
+          id: 'import_rerun_last',
+          label: 'Re-run Last Import',
+          icon: Icons.restart_alt_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Re-run Last Import',
+            'Recent import recipes are a follow-up workflow.',
+          ),
+        ),
+        command(
+          id: 'import_open_wizard',
+          label: 'Open Import Wizard...',
+          icon: Icons.file_open_outlined,
+          onInvoke: _showImportChooser,
+        ),
+        command(
+          id: 'export_results_csv',
+          label: 'Export Results as CSV...',
+          icon: Icons.file_download_outlined,
+          onInvoke: controller.exportCurrentQuery,
+          enabled: true,
+        ),
+        command(
+          id: 'export_results_json',
+          label: 'Export Results as JSON...',
+          icon: Icons.data_object_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Export JSON',
+            'JSON export is represented in the proof menu but not implemented yet.',
+          ),
+        ),
+        command(
+          id: 'export_results_parquet',
+          label: 'Export Results as Parquet...',
+          icon: Icons.view_column_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Export Parquet',
+            'Parquet export is represented in the proof menu but not implemented yet.',
+          ),
+        ),
+        command(
+          id: 'export_results_excel',
+          label: 'Export Results as Excel...',
+          icon: Icons.table_view_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Export Excel',
+            'Excel export is represented in the proof menu but not implemented yet.',
+          ),
+        ),
+        command(
+          id: 'export_table',
+          label: 'Export Table...',
+          icon: Icons.table_rows_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Export Table',
+            'Table-level export workflows will reuse the results/export pipeline.',
+          ),
+        ),
+        command(
+          id: 'export_schema',
+          label: 'Export Schema...',
+          icon: Icons.schema_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Export Schema',
+            'Schema export is a shell placeholder in this proof.',
+          ),
+        ),
+        command(
+          id: 'export_rerun_last',
+          label: 'Re-run Last Export',
+          icon: Icons.replay_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Re-run Last Export',
+            'Reusable export recipes are a follow-up workflow.',
+          ),
+        ),
+        command(
+          id: 'view_reset_layout',
+          label: 'Reset Layout',
+          icon: Icons.space_dashboard_outlined,
+          onInvoke: () async => _shellController.resetLayout(),
+        ),
+        command(
+          id: 'view_toggle_schema',
+          label: 'Show/Hide Schema Explorer',
+          icon: Icons.account_tree_outlined,
+          checked: prefs.showSchemaExplorer,
+          onInvoke: () async => _shellController.setSchemaExplorerVisible(
+            !prefs.showSchemaExplorer,
+          ),
+        ),
+        command(
+          id: 'view_toggle_properties',
+          label: 'Show/Hide Properties',
+          icon: Icons.info_outline,
+          checked: prefs.showPropertiesPane,
+          onInvoke: () async => _shellController.setPropertiesPaneVisible(
+            !prefs.showPropertiesPane,
+          ),
+        ),
+        command(
+          id: 'view_toggle_results',
+          label: 'Show/Hide Results',
+          icon: Icons.table_view_outlined,
+          checked: prefs.showResultsPane,
+          onInvoke: () async =>
+              _shellController.setResultsPaneVisible(!prefs.showResultsPane),
+        ),
+        command(
+          id: 'view_toggle_status_bar',
+          label: 'Show/Hide Status Bar',
+          icon: Icons.horizontal_rule_outlined,
+          checked: prefs.showStatusBar,
+          onInvoke: () async =>
+              _shellController.setStatusBarVisible(!prefs.showStatusBar),
+        ),
+        command(
+          id: 'view_zoom_in',
+          label: 'Zoom In',
+          icon: Icons.zoom_in_outlined,
+          onInvoke: () async => _shellController.zoomIn(),
+        ),
+        command(
+          id: 'view_zoom_out',
+          label: 'Zoom Out',
+          icon: Icons.zoom_out_outlined,
+          onInvoke: () async => _shellController.zoomOut(),
+        ),
+        command(
+          id: 'view_zoom_reset',
+          label: 'Reset Zoom',
+          icon: Icons.center_focus_strong_outlined,
+          onInvoke: () async => _shellController.resetZoom(),
+        ),
+        command(
+          id: 'tools_run_query',
+          label: 'Run Query',
+          icon: Icons.play_arrow_outlined,
+          onInvoke: controller.runActiveTab,
+          enabled: controller.canRunActiveTab,
+        ),
+        command(
+          id: 'tools_stop_query',
+          label: 'Stop Query',
+          icon: Icons.stop_circle_outlined,
+          onInvoke: controller.cancelActiveQuery,
+          enabled: controller.canCancelActiveTab,
+        ),
+        command(
+          id: 'tools_format_sql',
+          label: 'Format SQL',
+          icon: Icons.auto_fix_high_outlined,
+          onInvoke: () async => _formatActiveSql(),
+        ),
+        command(
+          id: 'tools_new_query_tab',
+          label: 'New Query Tab',
+          icon: Icons.add_box_outlined,
+          onInvoke: () async => controller.createTab(),
+        ),
+        command(
+          id: 'tools_query_history',
+          label: 'Query History',
+          icon: Icons.history_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Query History',
+            'History persistence is not wired in this shell proof yet.',
+          ),
+        ),
+        command(
+          id: 'tools_snippets',
+          label: 'Snippets',
+          icon: Icons.snippet_folder_outlined,
+          onInvoke: _showSnippetBrowser,
+        ),
+        command(
+          id: 'tools_manage_connections',
+          label: 'Manage Connections',
+          icon: Icons.settings_ethernet_outlined,
+          onInvoke: () => _showPlaceholderNotice(
+            'Manage Connections',
+            'Live connection management is a placeholder in this DecentDB-first shell.',
+          ),
+        ),
+        command(
+          id: 'tools_options',
+          label: 'Options / Preferences',
+          icon: Icons.tune_outlined,
+          onInvoke: _showPreferencesDialog,
+        ),
+        command(
+          id: 'help_docs',
+          label: 'Documentation',
+          icon: Icons.menu_book_outlined,
+          onInvoke: _showDocumentationDialog,
+        ),
+        command(
+          id: 'help_keyboard_shortcuts',
+          label: 'Keyboard Shortcuts',
+          icon: Icons.keyboard_outlined,
+          onInvoke: () => _showShortcutDialog(shortcuts),
+        ),
+        command(
+          id: 'help_about',
+          label: 'About Decent Bench',
+          icon: Icons.info_outline,
+          onInvoke: _showAboutDialog,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _createNewWorkspace() async {
+    final result = await getSaveLocation(
+      suggestedName: 'workspace.ddb',
+      acceptedTypeGroups: const <XTypeGroup>[_decentDbTypeGroup],
+    );
+    if (result == null) {
+      return;
+    }
+    await widget.controller.openDatabase(result.path, createIfMissing: true);
+  }
+
+  Future<void> _openWorkspace() async {
+    final file = await openFile(
+      acceptedTypeGroups: const <XTypeGroup>[_decentDbTypeGroup],
+    );
+    if (file == null) {
+      return;
+    }
+    await widget.controller.openDatabase(file.path, createIfMissing: false);
+  }
+
+  Future<void> _openRecentWorkspace(String path) async {
+    await widget.controller.openDatabase(path, createIfMissing: false);
+  }
+
   Future<void> _showSqliteImportDialog({String sourcePath = ''}) async {
     final controller = widget.controller;
     if (!controller.hasSqliteImportSession || sourcePath.trim().isNotEmpty) {
       controller.beginSqliteImport(sourcePath: sourcePath);
     }
-
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -235,7 +813,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (!controller.hasExcelImportSession || sourcePath.trim().isNotEmpty) {
       controller.beginExcelImport(sourcePath: sourcePath);
     }
-
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -252,7 +829,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (!controller.hasSqlDumpImportSession || sourcePath.trim().isNotEmpty) {
       controller.beginSqlDumpImport(sourcePath: sourcePath);
     }
-
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -264,29 +840,62 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     controller.closeSqlDumpImportSession();
   }
 
+  Future<void> _showImportChooser() {
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Open Import Wizard'),
+          content: const Text(
+            'Choose the source type to launch a wizard with realistic desktop flow.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showExcelImportDialog();
+              },
+              child: const Text('Excel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showSqliteImportDialog();
+              },
+              child: const Text('SQLite'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showSqlDumpImportDialog();
+              },
+              child: const Text('SQL Dump'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _handleIncomingFiles(Iterable<String> rawPaths) async {
     final decision = decideWorkspaceIncomingFiles(rawPaths);
     final path = decision.primaryPath;
     if (path == null) {
-      await _showIncomingFileNotice(
-        title: 'No file detected',
-        message:
-            'Drop a local DecentDB, SQLite, Excel, or SQL dump file to continue.',
+      await _showPlaceholderNotice(
+        'No file detected',
+        'Drop a DecentDB, SQLite, Excel, or SQL dump file to continue.',
       );
       return;
     }
-
-    if (decision.hadMultipleFiles && mounted) {
-      await _showIncomingFileNotice(
-        title: 'One file at a time',
-        message:
-            'MVP supports importing one file at a time. Continuing with ${p.basename(path)}.',
+    if (decision.hadMultipleFiles) {
+      await _showPlaceholderNotice(
+        'One file at a time',
+        'MVP import currently continues with ${p.basename(path)}.',
       );
     }
 
     switch (decision.kind) {
       case WorkspaceIncomingFileKind.decentDb:
-        _dbPathController.text = path;
         await widget.controller.openDatabase(path, createIfMissing: false);
         break;
       case WorkspaceIncomingFileKind.sqlite:
@@ -299,952 +908,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         await _showSqlDumpImportDialog(sourcePath: path);
         break;
       case WorkspaceIncomingFileKind.unknown:
-        await _showIncomingFileNotice(
-          title: 'Unknown file type',
-          message:
-              'Supported files are DecentDB `.ddb`, SQLite `.db`/`.sqlite`/`.sqlite3`, Excel `.xls`/`.xlsx`, and `.sql` dumps.',
+        await _showPlaceholderNotice(
+          'Unknown file type',
+          'Supported files are `.ddb`, `.db`/`.sqlite`/`.sqlite3`, `.xls`/`.xlsx`, and `.sql`.',
         );
         break;
     }
   }
 
-  Future<void> _showIncomingFileNotice({
-    required String title,
-    required String message,
-  }) {
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+  void _formatActiveSql() {
+    final formatted = _sqlFormatter.format(
+      _sqlController.text,
+      settings: widget.controller.config.editorSettings,
     );
-  }
-
-  Widget _buildConnectionPane() {
-    final controller = widget.controller;
-    return PanelCard(
-      title: 'Workspace',
-      subtitle: controller.databasePath == null
-          ? 'Open a DecentDB file, create a new one, or import dropped SQLite, Excel, or SQL dump sources.'
-          : controller.databasePath ?? '',
-      actions: <Widget>[
-        IconButton(
-          tooltip: 'Reload schema',
-          onPressed:
-              controller.hasOpenDatabase &&
-                  !controller.isSchemaLoading &&
-                  !controller.isOpeningDatabase
-              ? controller.refreshSchema
-              : null,
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-      ],
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            TextField(
-              controller: _dbPathController,
-              decoration: const InputDecoration(
-                labelText: 'Database path',
-                hintText: '/tmp/workbench.ddb',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: controller.isOpeningDatabase
-                        ? null
-                        : () => controller.openDatabase(
-                            _dbPathController.text,
-                            createIfMissing: false,
-                          ),
-                    child: const Text('Open Existing'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: controller.isOpeningDatabase
-                        ? null
-                        : () => controller.openDatabase(
-                            _dbPathController.text,
-                            createIfMissing: true,
-                          ),
-                    child: const Text('Create New'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: controller.isOpeningDatabase
-                    ? null
-                    : () => _showSqliteImportDialog(),
-                icon: const Icon(Icons.file_upload_outlined),
-                label: const Text('Import SQLite'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: controller.isOpeningDatabase
-                    ? null
-                    : () => _showExcelImportDialog(),
-                icon: const Icon(Icons.table_chart_outlined),
-                label: const Text('Import Excel'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: controller.isOpeningDatabase
-                    ? null
-                    : () => _showSqlDumpImportDialog(),
-                icon: const Icon(Icons.description_outlined),
-                label: const Text('Import SQL Dump'),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (controller.workspaceError != null) ...<Widget>[
-              _InlineBanner(
-                color: Theme.of(context).colorScheme.errorContainer,
-                icon: Icons.error_outline_rounded,
-                text: controller.workspaceError!,
-              ),
-              const SizedBox(height: 12),
-            ] else if (controller.workspaceMessage != null) ...<Widget>[
-              _InlineBanner(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                icon: Icons.info_outline_rounded,
-                text: controller.workspaceMessage!,
-              ),
-              const SizedBox(height: 12),
-            ],
-            Text('Recent files', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            if (controller.config.recentFiles.isEmpty)
-              const _CompactEmptyState(
-                title: 'No recent files yet',
-                message: 'The most recent DecentDB paths will appear here.',
-              )
-            else
-              Column(
-                children: <Widget>[
-                  for (final item in controller.config.recentFiles) ...<Widget>[
-                    OutlinedButton(
-                      onPressed: controller.isOpeningDatabase
-                          ? null
-                          : () {
-                              _dbPathController.text = item;
-                              controller.openDatabase(
-                                item,
-                                createIfMissing: false,
-                              );
-                            },
-                      style: OutlinedButton.styleFrom(
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.all(14),
-                      ),
-                      child: Text(
-                        item,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ],
-              ),
-          ],
-        ),
-      ),
+    _sqlController.value = TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
+    widget.controller.updateActiveSql(formatted);
   }
 
-  Widget _buildSchemaPane({
-    required WorkspaceController controller,
-    required List<SchemaObjectSummary> filteredObjects,
-    required SchemaObjectSummary? selectedObject,
-  }) {
-    return PanelCard(
-      title: 'Schema',
-      subtitle: controller.hasOpenDatabase
-          ? '${controller.schema.tables.length} tables, ${controller.schema.views.length} views, ${controller.schema.indexes.length} indexes'
-          : 'Schema details appear after opening a database.',
-      child: controller.isSchemaLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: <Widget>[
-                TextField(
-                  controller: _schemaFilterController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Filter schema',
-                    hintText: 'tables, columns, indexes, constraints',
-                    prefixIcon: Icon(Icons.search_rounded),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: controller.schema.objects.isEmpty
-                      ? const _EmptyState(
-                          title: 'No schema loaded',
-                          message:
-                              'Create a table or open an existing database to inspect objects and indexes.',
-                        )
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            final splitVertical = constraints.maxWidth < 420;
-                            if (splitVertical) {
-                              return Column(
-                                children: <Widget>[
-                                  Expanded(
-                                    child: _buildSchemaObjectList(
-                                      filteredObjects,
-                                      selectedObject,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Expanded(
-                                    child: _buildSchemaDetails(
-                                      controller,
-                                      selectedObject,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-                            return Row(
-                              children: <Widget>[
-                                SizedBox(
-                                  width: 200,
-                                  child: _buildSchemaObjectList(
-                                    filteredObjects,
-                                    selectedObject,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: _buildSchemaDetails(
-                                    controller,
-                                    selectedObject,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildSchemaObjectList(
-    List<SchemaObjectSummary> filteredObjects,
-    SchemaObjectSummary? selectedObject,
-  ) {
-    if (filteredObjects.isEmpty) {
-      return const _CompactEmptyState(
-        title: 'Nothing matched',
-        message: 'Try a broader schema filter.',
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: ListView.separated(
-        itemCount: filteredObjects.length,
-        separatorBuilder: (_, _) => Divider(
-          height: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
-        itemBuilder: (context, index) {
-          final object = filteredObjects[index];
-          final isSelected = object.name == selectedObject?.name;
-          return Material(
-            color: isSelected
-                ? Theme.of(context).colorScheme.secondaryContainer
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () {
-                setState(() {
-                  _selectedSchemaObjectName = object.name;
-                });
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: <Widget>[
-                    Icon(
-                      object.kind == SchemaObjectKind.table
-                          ? Icons.table_chart_rounded
-                          : Icons.visibility_rounded,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            object.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${object.columns.length} columns',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildSchemaDetails(
-    WorkspaceController controller,
-    SchemaObjectSummary? object,
-  ) {
-    if (object == null) {
-      return const _CompactEmptyState(
-        title: 'Select an object',
-        message: 'Choose a table or view to inspect details.',
-      );
-    }
-
-    final relatedIndexes = controller.schema.indexesForObject(object.name);
-    final notes = controller.schemaNotesForObject(object);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(object.name, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                Chip(label: Text(object.kind.name)),
-                Chip(label: Text('${object.columns.length} columns')),
-                Chip(label: Text('${relatedIndexes.length} indexes')),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Text('Columns', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            for (final column in object.columns) ...<Widget>[
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(column.name),
-                subtitle: Text(column.descriptor),
-              ),
-              const Divider(height: 1),
-            ],
-            const SizedBox(height: 14),
-            Text('Constraints', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            if (object.exposedConstraintSummaries.isEmpty)
-              const Text('No exposed column-level constraints for this object.')
-            else
-              for (final constraint in object.exposedConstraintSummaries)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(constraint),
-                ),
-            const SizedBox(height: 14),
-            Text('Indexes', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            if (relatedIndexes.isEmpty)
-              const Text('No indexes associated with this object.')
-            else
-              for (final index in relatedIndexes)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    '${index.name}: ${index.kind}'
-                    '${index.unique ? ' | UNIQUE' : ''}'
-                    ' | (${index.columns.join(", ")})',
-                  ),
-                ),
-            if (object.ddl != null) ...<Widget>[
-              const SizedBox(height: 14),
-              Text('Definition', style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: 8),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: SelectableText(
-                    object.ddl!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 14),
-            Text(
-              'Adapter Notes',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            for (final note in notes)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(note, style: Theme.of(context).textTheme.bodySmall),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSqlPane(
-    QueryTabState activeTab,
-    AutocompleteResult autocompleteResult,
-  ) {
-    final controller = widget.controller;
-    return PanelCard(
-      title: 'SQL Workspace',
-      subtitle:
-          'Phase 3 adds schema-aware autocomplete, user-editable snippets, deterministic formatting, and persisted editor settings on top of the tabbed query workspace.',
-      actions: <Widget>[
-        FilledButton.icon(
-          onPressed: controller.canRunActiveTab
-              ? controller.runActiveTab
-              : null,
-          icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('Run SQL'),
-        ),
-        const SizedBox(width: 8),
-        OutlinedButton.icon(
-          onPressed: controller.canCancelActiveTab
-              ? controller.cancelActiveQuery
-              : null,
-          icon: const Icon(Icons.stop_rounded),
-          label: const Text('Stop'),
-        ),
-      ],
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final editorHeight = math.max(180.0, constraints.maxHeight * 0.42);
-          return SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Column(
-                children: <Widget>[
-                  _buildTabStrip(controller, activeTab),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        OutlinedButton.icon(
-                          onPressed: _formatActiveSql,
-                          icon: const Icon(Icons.auto_fix_high_rounded),
-                          label: const Text('Format SQL'),
-                        ),
-                        PopupMenuButton<SqlSnippet>(
-                          onSelected: _insertSnippet,
-                          itemBuilder: (context) {
-                            return <PopupMenuEntry<SqlSnippet>>[
-                              for (final snippet in controller.config.snippets)
-                                PopupMenuItem<SqlSnippet>(
-                                  value: snippet,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(snippet.name),
-                                      Text(
-                                        snippet.trigger,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ];
-                          },
-                          child: IgnorePointer(
-                            child: OutlinedButton.icon(
-                              onPressed: () {},
-                              icon: const Icon(Icons.code_rounded),
-                              label: const Text('Insert Snippet'),
-                            ),
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _showSnippetManager,
-                          icon: const Icon(Icons.library_books_rounded),
-                          label: const Text('Manage Snippets'),
-                        ),
-                        IconButton(
-                          tooltip: 'Editor settings',
-                          onPressed: _showEditorSettingsDialog,
-                          icon: const Icon(Icons.tune_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: TextField(
-                          controller: _paramsController,
-                          onChanged: controller.updateActiveParameterJson,
-                          decoration: const InputDecoration(
-                            labelText: 'Parameters (JSON array)',
-                            hintText: '[1, "alice", true]',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 120,
-                        child: TextField(
-                          controller: _pageSizeController,
-                          decoration: const InputDecoration(
-                            labelText: 'Page size',
-                          ),
-                          keyboardType: TextInputType.number,
-                          onSubmitted: controller.updateDefaultPageSize,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: editorHeight,
-                    child: Focus(
-                      focusNode: _sqlFocusNode,
-                      onKeyEvent: _handleEditorKeyEvent,
-                      child: TextField(
-                        controller: _sqlController,
-                        onChanged: controller.updateActiveSql,
-                        expands: true,
-                        maxLines: null,
-                        minLines: null,
-                        textAlignVertical: TextAlignVertical.top,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontFamily: 'monospace',
-                          height: 1.35,
-                        ),
-                        decoration: const InputDecoration(
-                          alignLabelWithHint: true,
-                          labelText: 'SQL',
-                          hintText: 'SELECT 1 AS ready;',
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (!autocompleteResult.isEmpty) ...<Widget>[
-                    const SizedBox(height: 12),
-                    _buildAutocompletePanel(autocompleteResult),
-                  ],
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        Chip(label: Text('State: ${activeTab.phase.name}')),
-                        if (activeTab.elapsed != null)
-                          Chip(
-                            label: Text(
-                              'Elapsed: ${activeTab.elapsed!.inMilliseconds} ms',
-                            ),
-                          ),
-                        if (activeTab.rowsAffected != null)
-                          Chip(
-                            label: Text(
-                              'Rows affected: ${activeTab.rowsAffected}',
-                            ),
-                          ),
-                        Chip(
-                          label: Text(
-                            'Default page size: ${controller.config.defaultPageSize}',
-                          ),
-                        ),
-                        if (activeTab.isResultPartial)
-                          const Chip(label: Text('Partial results retained')),
-                      ],
-                    ),
-                  ),
-                  if (activeTab.statusMessage != null &&
-                      activeTab.error == null) ...<Widget>[
-                    const SizedBox(height: 12),
-                    _InlineBanner(
-                      color: Theme.of(context).colorScheme.secondaryContainer,
-                      icon: activeTab.phase == QueryPhase.cancelled
-                          ? Icons.warning_amber_rounded
-                          : Icons.info_outline_rounded,
-                      text: activeTab.statusMessage!,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildTabStrip(
-    WorkspaceController controller,
-    QueryTabState activeTab,
-  ) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: <Widget>[
-                for (final tab in controller.tabs) ...<Widget>[
-                  _QueryTabChip(
-                    tab: tab,
-                    isActive: tab.id == activeTab.id,
-                    onTap: () => controller.selectTab(tab.id),
-                    onClose: () => controller.closeTab(tab.id),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-              ],
-            ),
-          ),
-        ),
-        FilledButton.tonalIcon(
-          onPressed: controller.createTab,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('New Tab'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildResultsPane(QueryTabState activeTab) {
-    final controller = widget.controller;
-    return PanelCard(
-      title: 'Results',
-      subtitle: activeTab.resultColumns.isEmpty
-          ? 'Each query tab owns its own results, error state, and export controls.'
-          : '${activeTab.resultRows.length} rows loaded'
-                '${activeTab.hasMoreRows ? ' | more rows available' : ''}'
-                '${activeTab.isResultPartial ? ' | partial result' : ''}',
-      child: Column(
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _exportPathController,
-                  onChanged: controller.updateActiveExportPath,
-                  decoration: const InputDecoration(
-                    labelText: 'CSV export path',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 96,
-                child: TextField(
-                  controller: _delimiterController,
-                  decoration: const InputDecoration(labelText: 'Delimiter'),
-                  onSubmitted: controller.updateCsvDelimiter,
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilterChip(
-                label: const Text('Headers'),
-                selected: controller.config.csvIncludeHeaders,
-                onSelected: controller.updateCsvIncludeHeaders,
-              ),
-              const SizedBox(width: 12),
-              FilledButton.tonalIcon(
-                onPressed: activeTab.isExporting
-                    ? null
-                    : controller.exportCurrentQuery,
-                icon: const Icon(Icons.download_rounded),
-                label: Text(
-                  activeTab.isExporting ? 'Exporting...' : 'Export CSV',
-                ),
-              ),
-            ],
-          ),
-          if (activeTab.error != null) ...<Widget>[
-            const SizedBox(height: 12),
-            _ErrorPanel(
-              error: activeTab.error!,
-              onCopyDetails: () => _copyActiveErrorDetails(activeTab),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Expanded(
-            child: Focus(
-              focusNode: _resultsFocusNode,
-              onKeyEvent: _handleResultsKeyEvent,
-              child: activeTab.resultColumns.isEmpty
-                  ? _buildResultSummary(activeTab)
-                  : _buildResultsTable(activeTab),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildResultSummary(QueryTabState tab) {
-    if (tab.rowsAffected != null) {
-      return Center(
-        child: Text(
-          'Statement finished with ${tab.rowsAffected} affected rows.',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-      );
-    }
-
-    final title = switch (tab.phase) {
-      QueryPhase.cancelled => 'Query cancelled',
-      QueryPhase.failed => 'Query failed',
-      QueryPhase.opening ||
-      QueryPhase.running ||
-      QueryPhase.fetching => 'Running query',
-      _ => 'No result set yet',
-    };
-    final message = switch (tab.phase) {
-      QueryPhase.cancelled =>
-        'Run the tab again or adjust the SQL. Partial rows remain visible only when at least one page arrived before cancellation.',
-      QueryPhase.failed =>
-        'Inspect the error details above or copy them for debugging.',
-      QueryPhase.opening ||
-      QueryPhase.running ||
-      QueryPhase.fetching => 'The first page has not completed yet.',
-      _ =>
-        'Run a SELECT, EXPLAIN, CTE, or other row-producing statement to page through results.',
-    };
-
-    return _EmptyState(title: title, message: message);
-  }
-
-  Widget _buildResultsTable(QueryTabState tab) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final tableWidth = math
-            .max(constraints.maxWidth, tab.resultColumns.length * 220)
-            .toDouble();
-
-        return Scrollbar(
-          controller: _resultsHorizontalController,
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            controller: _resultsHorizontalController,
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: tableWidth,
-              height: constraints.maxHeight,
-              child: Column(
-                children: <Widget>[
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        for (final column in tab.resultColumns)
-                          _ResultCell(
-                            width: 220,
-                            value: column,
-                            isHeader: true,
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: Scrollbar(
-                      controller: _resultsScrollController,
-                      thumbVisibility: true,
-                      child: ListView.builder(
-                        controller: _resultsScrollController,
-                        itemCount:
-                            tab.resultRows.length + (tab.hasMoreRows ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index >= tab.resultRows.length) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 24),
-                              child: Center(
-                                child: tab.phase == QueryPhase.fetching
-                                    ? const CircularProgressIndicator()
-                                    : OutlinedButton.icon(
-                                        onPressed: () => widget.controller
-                                            .fetchNextPage(tabId: tab.id),
-                                        icon: const Icon(
-                                          Icons.expand_more_rounded,
-                                        ),
-                                        label: const Text('Load next page'),
-                                      ),
-                              ),
-                            );
-                          }
-
-                          final row = tab.resultRows[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(18),
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant
-                                      .withValues(alpha: 0.5),
-                                ),
-                              ),
-                              child: Row(
-                                children: <Widget>[
-                                  for (final column in tab.resultColumns)
-                                    _ResultCell(
-                                      width: 220,
-                                      value: formatCellValue(row[column]),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  AutocompleteResult _autocompleteFor(WorkspaceController controller) {
+  void _insertSnippet(SqlSnippet snippet) {
+    final text = _sqlController.text;
     final selection = _sqlController.selection;
-    final offset = selection.isValid && selection.baseOffset >= 0
-        ? selection.baseOffset
-        : _sqlController.text.length;
-    return _autocompleteEngine.suggest(
-      sql: _sqlController.text,
-      cursorOffset: offset,
-      schema: controller.schema,
-      config: controller.config,
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    final replacement = snippet.body;
+    final updated =
+        text.substring(0, start) + replacement + text.substring(end);
+    final offset = start + replacement.length;
+    _sqlController.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: offset),
     );
-  }
-
-  Widget _buildAutocompletePanel(AutocompleteResult autocompleteResult) {
-    return SizedBox(
-      height: 148,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-              child: Text(
-                'Autocomplete',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView.builder(
-                itemCount: autocompleteResult.suggestions.length,
-                itemBuilder: (context, index) {
-                  final suggestion = autocompleteResult.suggestions[index];
-                  return ListTile(
-                    dense: true,
-                    onTap: () => _applyAutocompleteSuggestion(
-                      autocompleteResult,
-                      suggestion,
-                    ),
-                    leading: Icon(_suggestionIcon(suggestion.kind)),
-                    title: Text(suggestion.label),
-                    subtitle: Text(suggestion.detail),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _suggestionIcon(AutocompleteSuggestionKind kind) {
-    return switch (kind) {
-      AutocompleteSuggestionKind.object => Icons.table_rows_rounded,
-      AutocompleteSuggestionKind.column => Icons.view_column_rounded,
-      AutocompleteSuggestionKind.function => Icons.functions_rounded,
-      AutocompleteSuggestionKind.keyword => Icons.key_rounded,
-      AutocompleteSuggestionKind.snippet => Icons.code_rounded,
-    };
+    widget.controller.updateActiveSql(updated);
   }
 
   void _applyAutocompleteSuggestion(
@@ -1262,493 +959,160 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       selection: TextSelection.collapsed(offset: offset),
     );
     widget.controller.updateActiveSql(updated);
-    _sqlFocusNode.requestFocus();
   }
 
-  void _insertSnippet(SqlSnippet snippet) {
-    _insertTextAtSelection(snippet.body);
+  Future<void> _showSnippetBrowser() {
+    final snippets = widget.controller.config.snippets;
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('SQL Snippets'),
+          content: SizedBox(
+            width: 620,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: snippets.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final snippet = snippets[index];
+                return ListTile(
+                  title: Text(snippet.name),
+                  subtitle: Text(snippet.description),
+                  trailing: Text(snippet.trigger),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _insertSnippet(snippet);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
-  void _insertTextAtSelection(String text) {
-    final selection = _sqlController.selection;
-    final start = selection.isValid && selection.start >= 0
-        ? math.min(selection.start, selection.end)
-        : _sqlController.text.length;
-    final end = selection.isValid && selection.end >= 0
-        ? math.max(selection.start, selection.end)
-        : _sqlController.text.length;
-    final updated = _sqlController.text.replaceRange(start, end, text);
-    final offset = start + text.length;
-    _sqlController.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: offset),
+  Future<void> _showShortcutDialog(Map<String, ShortcutBinding> shortcuts) {
+    final sorted = shortcuts.values.toList()
+      ..sort((left, right) => left.commandId.compareTo(right.commandId));
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Keyboard Shortcuts'),
+          content: SizedBox(
+            width: 520,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: sorted.length,
+              itemBuilder: (context, index) {
+                final shortcut = sorted[index];
+                return ListTile(
+                  dense: true,
+                  title: Text(shortcut.commandId.replaceAll('_', ' ')),
+                  trailing: Text(
+                    shortcut.displayLabel,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(fontFamily: 'monospace'),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
     );
-    widget.controller.updateActiveSql(updated);
-    _sqlFocusNode.requestFocus();
   }
 
-  void _formatActiveSql() {
-    final source = _sqlController.text;
-    if (source.trim().isEmpty) {
-      return;
-    }
+  Future<void> _showDocumentationDialog() {
+    return _showPlaceholderNotice(
+      'Documentation',
+      'This shell proof emphasizes import, query, and export workflows. Use the menu bar, keyboard shortcuts, and draggable panes to evaluate desktop behavior.',
+    );
+  }
 
-    final selection = _sqlController.selection;
-    final useSelection = selection.isValid && !selection.isCollapsed;
-    final start = useSelection ? selection.start : 0;
-    final end = useSelection ? selection.end : source.length;
-    final formatted = _sqlFormatter.format(
-      source.substring(start, end),
-      settings: widget.controller.config.editorSettings,
+  Future<void> _showPreferencesDialog() {
+    final config = widget.controller.config;
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Options / Preferences'),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('Default page size: ${config.defaultPageSize}'),
+                const SizedBox(height: 8),
+                Text('CSV delimiter: ${config.csvDelimiter}'),
+                const SizedBox(height: 8),
+                Text(
+                  'Autocomplete suggestions: ${config.editorSettings.autocompleteMaxSuggestions}',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Editor zoom: ${(_shellController.preferences.editorZoom * 100).round()}%',
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'This dialog is intentionally lightweight in the proof. It shows where shell, editor, and export preferences will converge.',
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
     );
-    final updated = source.replaceRange(start, end, formatted);
-    _sqlController.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: start + formatted.length),
-    );
-    widget.controller.updateActiveSql(updated);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          useSelection ? 'Formatted selected SQL.' : 'Formatted SQL document.',
+  }
+
+  Future<void> _showAboutDialog() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'Decent Bench',
+      applicationVersion: '0.1.0 shell proof',
+      children: const <Widget>[
+        Text(
+          'Classic desktop shell prototype for a DecentDB-first SQL workbench.',
         ),
-      ),
+      ],
     );
+    return Future<void>.value();
   }
 
-  Future<void> _showSnippetManager() async {
-    final controller = widget.controller;
-    await showDialog<void>(
+  Future<void> _showPlaceholderNotice(String title, String message) {
+    return showDialog<void>(
       context: context,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final snippets = controller.config.snippets;
-            return AlertDialog(
-              title: const Text('SQL Snippets'),
-              content: SizedBox(
-                width: 720,
-                height: 420,
-                child: snippets.isEmpty
-                    ? const _CompactEmptyState(
-                        title: 'No snippets',
-                        message: 'Add one to start inserting reusable SQL.',
-                      )
-                    : ListView.separated(
-                        itemCount: snippets.length,
-                        separatorBuilder: (_, _) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final snippet = snippets[index];
-                          return ListTile(
-                            title: Text(snippet.name),
-                            subtitle: Text(
-                              '${snippet.trigger} | ${snippet.description.isEmpty ? "No description" : snippet.description}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: Wrap(
-                              spacing: 8,
-                              children: <Widget>[
-                                IconButton(
-                                  tooltip: 'Insert',
-                                  onPressed: () {
-                                    Navigator.of(context).pop();
-                                    _insertSnippet(snippet);
-                                  },
-                                  icon: const Icon(Icons.north_west_rounded),
-                                ),
-                                IconButton(
-                                  tooltip: 'Edit',
-                                  onPressed: () async {
-                                    final edited =
-                                        await _showSnippetEditorDialog(
-                                          initial: snippet,
-                                        );
-                                    if (edited == null) {
-                                      return;
-                                    }
-                                    await controller.saveSnippet(edited);
-                                    setDialogState(() {});
-                                  },
-                                  icon: const Icon(Icons.edit_rounded),
-                                ),
-                                IconButton(
-                                  tooltip: 'Delete',
-                                  onPressed: () async {
-                                    await controller.deleteSnippet(snippet.id);
-                                    setDialogState(() {});
-                                  },
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () async {
-                    final created = await _showSnippetEditorDialog();
-                    if (created == null) {
-                      return;
-                    }
-                    await controller.saveSnippet(created);
-                    setDialogState(() {});
-                  },
-                  child: const Text('Add Snippet'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Close'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<SqlSnippet?> _showSnippetEditorDialog({SqlSnippet? initial}) async {
-    final nameController = TextEditingController(text: initial?.name ?? '');
-    final triggerController = TextEditingController(
-      text: initial?.trigger ?? '',
-    );
-    final descriptionController = TextEditingController(
-      text: initial?.description ?? '',
-    );
-    final bodyController = TextEditingController(text: initial?.body ?? '');
-    String? validationMessage;
-
-    final result = await showDialog<SqlSnippet>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text(initial == null ? 'New Snippet' : 'Edit Snippet'),
-              content: SizedBox(
-                width: 640,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'Name'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: triggerController,
-                      decoration: const InputDecoration(labelText: 'Trigger'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Description',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: bodyController,
-                      minLines: 6,
-                      maxLines: 12,
-                      decoration: const InputDecoration(
-                        alignLabelWithHint: true,
-                        labelText: 'SQL Body',
-                      ),
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
-                    ),
-                    if (validationMessage != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          validationMessage!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    if (nameController.text.trim().isEmpty ||
-                        triggerController.text.trim().isEmpty ||
-                        bodyController.text.trim().isEmpty) {
-                      setDialogState(() {
-                        validationMessage =
-                            'Name, trigger, and SQL body are required.';
-                      });
-                      return;
-                    }
-                    Navigator.of(context).pop(
-                      SqlSnippet(
-                        id: initial?.id ?? widget.controller.createSnippetId(),
-                        name: nameController.text.trim(),
-                        trigger: triggerController.text.trim(),
-                        description: descriptionController.text.trim(),
-                        body: bodyController.text,
-                      ),
-                    );
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    nameController.dispose();
-    triggerController.dispose();
-    descriptionController.dispose();
-    bodyController.dispose();
-    return result;
-  }
-
-  Future<void> _showEditorSettingsDialog() async {
-    final controller = widget.controller;
-    final suggestionLimitController = TextEditingController(
-      text: controller.config.editorSettings.autocompleteMaxSuggestions
-          .toString(),
-    );
-    final indentController = TextEditingController(
-      text: controller.config.editorSettings.indentSpaces.toString(),
-    );
-    var autocompleteEnabled =
-        controller.config.editorSettings.autocompleteEnabled;
-    var uppercaseKeywords =
-        controller.config.editorSettings.formatUppercaseKeywords;
-
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        final navigator = Navigator.of(context);
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Editor Settings'),
-              content: SizedBox(
-                width: 520,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: autocompleteEnabled,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          autocompleteEnabled = value;
-                        });
-                      },
-                      title: const Text('Enable autocomplete'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: uppercaseKeywords,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          uppercaseKeywords = value;
-                        });
-                      },
-                      title: const Text('Uppercase SQL keywords on format'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: suggestionLimitController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Max autocomplete suggestions',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: indentController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Formatter indent spaces',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () async {
-                    await controller.updateAutocompleteEnabled(
-                      autocompleteEnabled,
-                    );
-                    await controller.updateFormatterUppercaseKeywords(
-                      uppercaseKeywords,
-                    );
-                    await controller.updateAutocompleteMaxSuggestions(
-                      suggestionLimitController.text,
-                    );
-                    await controller.updateEditorIndentSpaces(
-                      indentController.text,
-                    );
-                    if (mounted) {
-                      navigator.pop();
-                    }
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    suggestionLimitController.dispose();
-    indentController.dispose();
-  }
-
-  Future<void> _copyActiveErrorDetails(QueryTabState tab) async {
-    final details = widget.controller.errorDetailsForTab(tab.id);
-    if (details == null) {
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: details));
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied error details to the clipboard.')),
-    );
-  }
-
-  KeyEventResult _handleEditorKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isPlainTabKey(event)) {
-      _resultsFocusNode.requestFocus();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  KeyEventResult _handleResultsKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isPlainTabKey(event)) {
-      _sqlFocusNode.requestFocus();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  bool _isPlainTabKey(KeyEvent event) {
-    final keyboard = HardwareKeyboard.instance;
-    return event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.tab &&
-        !keyboard.isControlPressed &&
-        !keyboard.isMetaPressed &&
-        !keyboard.isAltPressed;
-  }
-
-  SchemaObjectSummary? _selectedObjectFor(
-    List<SchemaObjectSummary> filteredObjects,
-  ) {
-    if (filteredObjects.isEmpty) {
-      return null;
-    }
-    for (final object in filteredObjects) {
-      if (object.name == _selectedSchemaObjectName) {
-        return object;
-      }
-    }
-    return filteredObjects.first;
-  }
-
-  void _syncFormFields(WorkspaceController controller) {
-    if (controller.databasePath != null &&
-        _dbPathController.text != controller.databasePath) {
-      _dbPathController.text = controller.databasePath!;
-    }
-
-    final pageSize = controller.config.defaultPageSize.toString();
-    if (_pageSizeController.text != pageSize) {
-      _pageSizeController.text = pageSize;
-    }
-    if (_delimiterController.text != controller.config.csvDelimiter) {
-      _delimiterController.text = controller.config.csvDelimiter;
-    }
-
-    final activeTab = controller.activeTab;
-    final tabChanged = _syncedTabId != activeTab.id;
-    if (tabChanged || _sqlController.text != activeTab.sql) {
-      _sqlController.value = TextEditingValue(
-        text: activeTab.sql,
-        selection: TextSelection.collapsed(offset: activeTab.sql.length),
-      );
-    }
-    if (tabChanged || _paramsController.text != activeTab.parameterJson) {
-      _paramsController.value = TextEditingValue(
-        text: activeTab.parameterJson,
-        selection: TextSelection.collapsed(
-          offset: activeTab.parameterJson.length,
-        ),
-      );
-    }
-    if (tabChanged || _exportPathController.text != activeTab.exportPath) {
-      final exportPath = activeTab.exportPath.isEmpty
-          ? controller.suggestExportPath(activeTab.id)
-          : activeTab.exportPath;
-      _exportPathController.value = TextEditingValue(
-        text: exportPath,
-        selection: TextSelection.collapsed(offset: exportPath.length),
-      );
-    }
-    _syncedTabId = activeTab.id;
-  }
-}
-
-class _WorkspaceBody extends StatelessWidget {
-  const _WorkspaceBody({required this.sidebar, required this.workbench});
-
-  final Widget sidebar;
-  final Widget workbench;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 1180) {
-          return Column(
-            children: <Widget>[
-              SizedBox(
-                height: math.min(
-                  440,
-                  math.max(300, constraints.maxHeight * 0.42),
-                ),
-                child: sidebar,
-              ),
-              const SizedBox(height: 16),
-              Expanded(child: workbench),
-            ],
-          );
-        }
-        return Row(
-          children: <Widget>[
-            SizedBox(width: 360, child: sidebar),
-            const SizedBox(width: 16),
-            Expanded(child: workbench),
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
           ],
         );
       },
@@ -1761,389 +1125,33 @@ class _DropOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.82),
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.primary,
-                  width: 2,
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Icon(
-                      Icons.file_download_outlined,
-                      size: 44,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Drop a DecentDB or SQLite file',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '`.ddb` files open immediately. `.db`, `.sqlite`, and `.sqlite3` files launch the SQLite import wizard.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: 0.18),
+      child: Center(
+        child: Container(
+          width: 420,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border.all(color: Theme.of(context).colorScheme.primary),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.controller});
-
-  final WorkspaceController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: <Color>[Color(0xFFF7E2D6), Color(0xFFE6F1EE)],
-        ),
-        borderRadius: BorderRadius.circular(28),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Decent Bench',
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'MVP workbench: open or create DecentDB files, drag in SQLite, Excel, or SQL dump sources for guided import, restore query tabs, author SQL with autocomplete and snippets, and iterate through paged results.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  _HeaderFact(
-                    label: 'Native library',
-                    value: controller.nativeLibraryPath ?? 'Resolving...',
-                  ),
-                  const SizedBox(height: 8),
-                  _HeaderFact(
-                    label: 'Engine',
-                    value: controller.engineVersion ?? 'No database open',
-                  ),
-                  const SizedBox(height: 8),
-                  _HeaderFact(
-                    label: 'Tabs',
-                    value:
-                        '${controller.tabs.length} total | ${controller.hasRunningTabs ? 'activity in progress' : 'idle'}',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HeaderFact extends StatelessWidget {
-  const _HeaderFact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InlineBanner extends StatelessWidget {
-  const _InlineBanner({
-    required this.color,
-    required this.icon,
-    required this.text,
-  });
-
-  final Color color;
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: <Widget>[
-            Icon(icon),
-            const SizedBox(width: 8),
-            Expanded(child: Text(text)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.error, required this.onCopyDetails});
-
-  final QueryErrorDetails error;
-  final VoidCallback onCopyDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Icon(
-              Icons.error_outline_rounded,
-              color: theme.colorScheme.onErrorContainer,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    '${error.stageLabel} error',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    error.message,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                  ),
-                  if (error.code != null) ...<Widget>[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Code: ${error.code}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onErrorContainer,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: onCopyDetails,
-              icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copy'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: theme.colorScheme.onErrorContainer,
-                side: BorderSide(color: theme.colorScheme.onErrorContainer),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.title, required this.message});
-
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Center(
-          child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: math.min(320, constraints.maxWidth),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    message,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _CompactEmptyState extends StatelessWidget {
-  const _CompactEmptyState({required this.title, required this.message});
-
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(title, style: theme.textTheme.titleSmall),
-          const SizedBox(height: 4),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QueryTabChip extends StatelessWidget {
-  const _QueryTabChip({
-    required this.tab,
-    required this.isActive,
-    required this.onTap,
-    required this.onClose,
-  });
-
-  final QueryTabState tab;
-  final bool isActive;
-  final VoidCallback onTap;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: isActive ? colors.primaryContainer : colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _phaseColor(colors, tab.phase),
-                  shape: BoxShape.circle,
-                ),
+              Icon(
+                Icons.file_download_outlined,
+                size: 36,
+                color: Theme.of(context).colorScheme.primary,
               ),
-              const SizedBox(width: 8),
-              Text(tab.title, style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(width: 8),
+              const SizedBox(height: 12),
               Text(
-                tab.phase.name,
-                style: Theme.of(context).textTheme.bodySmall,
+                'Drop file to open or import',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
-              const SizedBox(width: 8),
-              InkWell(
-                onTap: onClose,
-                borderRadius: BorderRadius.circular(12),
-                child: const Padding(
-                  padding: EdgeInsets.all(2),
-                  child: Icon(Icons.close_rounded, size: 18),
-                ),
+              const SizedBox(height: 8),
+              const Text(
+                'DecentDB files open directly. SQLite, Excel, and SQL dumps launch the matching import wizard.',
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -2151,66 +1159,4 @@ class _QueryTabChip extends StatelessWidget {
       ),
     );
   }
-
-  Color _phaseColor(ColorScheme colors, QueryPhase phase) {
-    return switch (phase) {
-      QueryPhase.opening ||
-      QueryPhase.running ||
-      QueryPhase.fetching ||
-      QueryPhase.cancelling => colors.tertiary,
-      QueryPhase.completed => colors.primary,
-      QueryPhase.cancelled => colors.error,
-      QueryPhase.failed => colors.error,
-      QueryPhase.idle => colors.outline,
-    };
-  }
-}
-
-class _ResultCell extends StatelessWidget {
-  const _ResultCell({
-    required this.width,
-    required this.value,
-    this.isHeader = false,
-  });
-
-  final double width;
-  final String value;
-  final bool isHeader;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: width,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Text(
-          value,
-          maxLines: isHeader ? 1 : 3,
-          overflow: TextOverflow.ellipsis,
-          style:
-              (isHeader
-                      ? theme.textTheme.labelLarge
-                      : theme.textTheme.bodyMedium)
-                  ?.copyWith(fontFamily: 'monospace'),
-        ),
-      ),
-    );
-  }
-}
-
-class _RunQueryIntent extends Intent {
-  const _RunQueryIntent();
-}
-
-class _NewTabIntent extends Intent {
-  const _NewTabIntent();
-}
-
-class _NextTabIntent extends Intent {
-  const _NextTabIntent();
-}
-
-class _PreviousTabIntent extends Intent {
-  const _PreviousTabIntent();
 }

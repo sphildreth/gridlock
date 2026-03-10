@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'workspace_shell_preferences.dart';
+
 class SqlSnippet {
   const SqlSnippet({
     required this.id,
@@ -103,14 +105,6 @@ class AppConfig {
   static const bool defaultCsvIncludeHeaders = true;
   static const int maxRecentFiles = 8;
 
-  final int configVersion;
-  final List<String> recentFiles;
-  final int defaultPageSize;
-  final String csvDelimiter;
-  final bool csvIncludeHeaders;
-  final EditorSettings editorSettings;
-  final List<SqlSnippet> snippets;
-
   const AppConfig({
     required this.configVersion,
     required this.recentFiles,
@@ -118,8 +112,20 @@ class AppConfig {
     required this.csvDelimiter,
     required this.csvIncludeHeaders,
     required this.editorSettings,
+    required this.shellPreferences,
+    required this.shortcutBindings,
     required this.snippets,
   });
+
+  final int configVersion;
+  final List<String> recentFiles;
+  final int defaultPageSize;
+  final String csvDelimiter;
+  final bool csvIncludeHeaders;
+  final EditorSettings editorSettings;
+  final WorkspaceShellPreferences shellPreferences;
+  final Map<String, String> shortcutBindings;
+  final List<SqlSnippet> snippets;
 
   factory AppConfig.defaults() {
     return AppConfig(
@@ -129,6 +135,8 @@ class AppConfig {
       csvDelimiter: defaultCsvDelimiter,
       csvIncludeHeaders: defaultCsvIncludeHeaders,
       editorSettings: EditorSettings.defaults(),
+      shellPreferences: WorkspaceShellPreferences.defaults(),
+      shortcutBindings: defaultShortcutBindings(),
       snippets: defaultSnippets(),
     );
   }
@@ -140,6 +148,8 @@ class AppConfig {
     String? csvDelimiter,
     bool? csvIncludeHeaders,
     EditorSettings? editorSettings,
+    WorkspaceShellPreferences? shellPreferences,
+    Map<String, String>? shortcutBindings,
     List<SqlSnippet>? snippets,
   }) {
     return AppConfig(
@@ -149,6 +159,8 @@ class AppConfig {
       csvDelimiter: csvDelimiter ?? this.csvDelimiter,
       csvIncludeHeaders: csvIncludeHeaders ?? this.csvIncludeHeaders,
       editorSettings: editorSettings ?? this.editorSettings,
+      shellPreferences: shellPreferences ?? this.shellPreferences,
+      shortcutBindings: shortcutBindings ?? this.shortcutBindings,
       snippets: snippets ?? this.snippets,
     );
   }
@@ -180,6 +192,7 @@ class AppConfig {
   }
 
   String toToml() {
+    final layout = shellPreferences.normalized();
     final buffer = StringBuffer()
       ..writeln('# Decent Bench configuration')
       ..writeln('config_version = $configVersion')
@@ -197,7 +210,31 @@ class AppConfig {
         'editor_format_uppercase_keywords = ${editorSettings.formatUppercaseKeywords}',
       )
       ..writeln('editor_indent_spaces = ${editorSettings.indentSpaces}')
-      ..writeln('editor_snippet_count = ${snippets.length}');
+      ..writeln('editor_snippet_count = ${snippets.length}')
+      ..writeln()
+      ..writeln('[layout]')
+      ..writeln(
+        'left_column_fraction = ${_formatDouble(layout.leftColumnFraction)}',
+      )
+      ..writeln('left_top_fraction = ${_formatDouble(layout.leftTopFraction)}')
+      ..writeln(
+        'right_top_fraction = ${_formatDouble(layout.rightTopFraction)}',
+      )
+      ..writeln('show_schema_explorer = ${layout.showSchemaExplorer}')
+      ..writeln('show_properties_pane = ${layout.showPropertiesPane}')
+      ..writeln('show_results_pane = ${layout.showResultsPane}')
+      ..writeln('show_status_bar = ${layout.showStatusBar}')
+      ..writeln('editor_zoom = ${_formatDouble(layout.editorZoom)}')
+      ..writeln(
+        'active_results_tab = ${jsonEncode(WorkspaceShellPreferences.encodeResultsTab(layout.activeResultsTab))}',
+      )
+      ..writeln()
+      ..writeln('[shortcuts]');
+
+    final sortedShortcutKeys = shortcutBindings.keys.toList()..sort();
+    for (final key in sortedShortcutKeys) {
+      buffer.writeln('$key = ${jsonEncode(shortcutBindings[key])}');
+    }
 
     for (final snippet in snippets) {
       buffer
@@ -217,6 +254,7 @@ class AppConfig {
     final parsedSnippets = <SqlSnippet>[];
     Map<String, Object?>? pendingSnippet;
     int? declaredSnippetCount;
+    String? currentTable;
 
     void flushSnippet() {
       if (pendingSnippet == null) {
@@ -235,9 +273,17 @@ class AppConfig {
       if (commentFree.isEmpty) {
         continue;
       }
-      if (commentFree == '[[editor_snippets]]') {
+      if (commentFree.startsWith('[[') && commentFree.endsWith(']]')) {
         flushSnippet();
-        pendingSnippet = <String, Object?>{};
+        currentTable = commentFree.substring(2, commentFree.length - 2).trim();
+        if (currentTable == 'editor_snippets') {
+          pendingSnippet = <String, Object?>{};
+        }
+        continue;
+      }
+      if (commentFree.startsWith('[') && commentFree.endsWith(']')) {
+        flushSnippet();
+        currentTable = commentFree.substring(1, commentFree.length - 1).trim();
         continue;
       }
       if (!commentFree.contains('=')) {
@@ -248,7 +294,7 @@ class AppConfig {
       final key = commentFree.substring(0, separatorIndex).trim();
       final value = commentFree.substring(separatorIndex + 1).trim();
 
-      if (pendingSnippet != null) {
+      if (pendingSnippet != null && currentTable == 'editor_snippets') {
         final parsed = _decodeJsonString(value);
         if (parsed != null &&
             const <String>{
@@ -263,7 +309,8 @@ class AppConfig {
         continue;
       }
 
-      switch (key) {
+      final qualifiedKey = currentTable == null ? key : '$currentTable.$key';
+      switch (qualifiedKey) {
         case 'config_version':
           final parsed = int.tryParse(value);
           if (parsed != null && parsed >= 0) {
@@ -348,6 +395,110 @@ class AppConfig {
             config = config.copyWith(snippets: parsed);
           }
           break;
+        case 'layout.left_column_fraction':
+          final parsed = double.tryParse(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                leftColumnFraction: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.left_top_fraction':
+          final parsed = double.tryParse(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                leftTopFraction: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.right_top_fraction':
+          final parsed = double.tryParse(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                rightTopFraction: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.show_schema_explorer':
+          final parsed = _parseBool(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                showSchemaExplorer: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.show_properties_pane':
+          final parsed = _parseBool(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                showPropertiesPane: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.show_results_pane':
+          final parsed = _parseBool(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                showResultsPane: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.show_status_bar':
+          final parsed = _parseBool(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                showStatusBar: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.editor_zoom':
+          final parsed = double.tryParse(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                editorZoom: parsed,
+              ),
+            );
+          }
+          break;
+        case 'layout.active_results_tab':
+          final parsed = _decodeJsonString(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              shellPreferences: config.shellPreferences.copyWith(
+                activeResultsTab: WorkspaceShellPreferences.parseResultsTab(
+                  parsed,
+                ),
+              ),
+            );
+          }
+          break;
+        default:
+          if (qualifiedKey.startsWith('shortcuts.')) {
+            final parsed = _decodeJsonString(value);
+            if (parsed != null && parsed.isNotEmpty) {
+              final updated = <String, String>{
+                ...config.shortcutBindings,
+                key: parsed,
+              };
+              config = config.copyWith(shortcutBindings: updated);
+            }
+          }
+          break;
       }
     }
 
@@ -360,7 +511,36 @@ class AppConfig {
       configVersion: config.configVersion == 0
           ? currentConfigVersion
           : config.configVersion,
+      shellPreferences: config.shellPreferences.normalized(),
     );
+  }
+
+  static Map<String, String> defaultShortcutBindings() {
+    return const <String, String>{
+      'edit_copy': 'Ctrl+C',
+      'edit_find': 'Ctrl+F',
+      'edit_find_next': 'F3',
+      'edit_paste': 'Ctrl+V',
+      'edit_redo': 'Ctrl+Shift+Z',
+      'edit_select_all': 'Ctrl+A',
+      'edit_undo': 'Ctrl+Z',
+      'export_results_csv': 'Ctrl+Shift+C',
+      'file_new': 'Ctrl+N',
+      'file_open': 'Ctrl+O',
+      'file_save': 'Ctrl+S',
+      'file_save_as': 'Ctrl+Shift+S',
+      'file_exit': 'Ctrl+Q',
+      'help_docs': 'F1',
+      'import_open_wizard': 'Ctrl+Shift+I',
+      'tools_format_sql': 'Ctrl+Shift+F',
+      'tools_new_query_tab': 'Ctrl+T',
+      'tools_run_query': 'Ctrl+Enter',
+      'tools_stop_query': 'Esc',
+      'view_reset_layout': 'Ctrl+Shift+R',
+      'view_zoom_in': 'Ctrl+=',
+      'view_zoom_out': 'Ctrl+-',
+      'view_zoom_reset': 'Ctrl+0',
+    };
   }
 
   static List<SqlSnippet> defaultSnippets() {
@@ -494,5 +674,12 @@ class AppConfig {
       buffer.write(char);
     }
     return buffer.toString();
+  }
+
+  static String _formatDouble(double value) {
+    final formatted = value.toStringAsFixed(3);
+    return formatted
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 }

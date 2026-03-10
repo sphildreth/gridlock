@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/workspace/application/workspace_controller.dart';
+import '../features/workspace/infrastructure/app_lifecycle_service.dart';
 import '../features/workspace/presentation/workspace_screen.dart';
 import 'theme.dart';
 
@@ -8,10 +9,12 @@ class DecentBenchApp extends StatefulWidget {
   const DecentBenchApp({
     super.key,
     this.controller,
+    this.appLifecycleService = const FlutterAppLifecycleService(),
     this.autoInitialize = true,
   });
 
   final WorkspaceController? controller;
+  final AppLifecycleService appLifecycleService;
   final bool autoInitialize;
 
   @override
@@ -44,7 +47,10 @@ class _DecentBenchAppState extends State<DecentBenchApp> {
       title: 'Decent Bench',
       debugShowCheckedModeBanner: false,
       theme: buildDecentBenchTheme(),
-      home: WorkspaceScreen(controller: _controller),
+      home: WorkspaceScreen(
+        controller: _controller,
+        appLifecycleService: widget.appLifecycleService,
+      ),
     );
   }
 }

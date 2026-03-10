@@ -249,10 +249,7 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
     required String sourcePath,
     required String encoding,
   }) async {
-    return inspectSqlDumpSourceInBackground(
-      sourcePath,
-      encoding: encoding,
-    );
+    return inspectSqlDumpSourceInBackground(sourcePath, encoding: encoding);
   }
 
   @override

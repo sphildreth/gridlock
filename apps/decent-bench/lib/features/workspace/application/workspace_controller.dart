@@ -10,9 +10,11 @@ import '../domain/excel_import_models.dart';
 import '../domain/sql_dump_import_models.dart';
 import '../domain/sqlite_import_models.dart';
 import '../domain/workspace_models.dart';
+import '../domain/workspace_shell_preferences.dart';
 import '../domain/workspace_state.dart';
 import '../infrastructure/app_config_store.dart';
 import '../infrastructure/decentdb_bridge.dart';
+import '../infrastructure/layout_persistence_service.dart';
 import '../infrastructure/workspace_state_store.dart';
 
 class WorkspaceController extends ChangeNotifier {
@@ -20,15 +22,19 @@ class WorkspaceController extends ChangeNotifier {
     WorkspaceDatabaseGateway? gateway,
     WorkspaceConfigStore? configStore,
     WorkspaceStateStore? workspaceStateStore,
+    LayoutPersistenceService? layoutPersistenceService,
   }) : _gateway = gateway ?? DecentDbBridge(),
        _configStore = configStore ?? AppConfigStore(),
-       _workspaceStateStore = workspaceStateStore ?? FileWorkspaceStateStore() {
+       _workspaceStateStore = workspaceStateStore ?? FileWorkspaceStateStore(),
+       _layoutPersistenceService =
+           layoutPersistenceService ?? const LayoutPersistenceService() {
     _resetTabs(notify: false, resetCounters: true);
   }
 
   final WorkspaceDatabaseGateway _gateway;
   final WorkspaceConfigStore _configStore;
   final WorkspaceStateStore _workspaceStateStore;
+  final LayoutPersistenceService _layoutPersistenceService;
 
   AppConfig config = AppConfig.defaults();
   SchemaSnapshot schema = SchemaSnapshot.empty();
@@ -726,6 +732,14 @@ class WorkspaceController extends ChangeNotifier {
     await _persistConfig('Deleted snippet "${existing.first.name}".');
   }
 
+  Future<void> updateShellPreferences(
+    WorkspaceShellPreferences preferences, {
+    String? statusMessage,
+  }) async {
+    config = _layoutPersistenceService.save(config, preferences);
+    await _persistConfig(statusMessage);
+  }
+
   void beginExcelImport({String sourcePath = ''}) {
     final trimmedSource = sourcePath.trim();
     excelImportSession = ExcelImportSession.initial(sourcePath: trimmedSource)
@@ -1365,54 +1379,54 @@ class WorkspaceController extends ChangeNotifier {
     );
     _safeNotify();
 
-    _sqlDumpImportSubscription = _gateway.importSqlDump(request: request).listen(
-      (update) {
-        final current = sqlDumpImportSession;
-        if (current == null || current.jobId != update.jobId) {
-          return;
-        }
+    _sqlDumpImportSubscription = _gateway
+        .importSqlDump(request: request)
+        .listen((update) {
+          final current = sqlDumpImportSession;
+          if (current == null || current.jobId != update.jobId) {
+            return;
+          }
 
-        switch (update.kind) {
-          case SqlDumpImportUpdateKind.progress:
-            sqlDumpImportSession = current.copyWith(
-              phase: current.phase == SqlDumpImportJobPhase.cancelling
-                  ? SqlDumpImportJobPhase.cancelling
-                  : SqlDumpImportJobPhase.running,
-              progress: update.progress,
-              error: null,
-            );
-            break;
-          case SqlDumpImportUpdateKind.completed:
-            sqlDumpImportSession = current.copyWith(
-              step: SqlDumpImportWizardStep.summary,
-              phase: SqlDumpImportJobPhase.completed,
-              summary: update.summary,
-              error: null,
-            );
-            workspaceMessage = update.summary?.statusMessage;
-            workspaceError = null;
-            break;
-          case SqlDumpImportUpdateKind.cancelled:
-            sqlDumpImportSession = current.copyWith(
-              step: SqlDumpImportWizardStep.summary,
-              phase: SqlDumpImportJobPhase.cancelled,
-              summary: update.summary,
-              error: null,
-            );
-            workspaceMessage = update.summary?.statusMessage;
-            workspaceError = null;
-            break;
-          case SqlDumpImportUpdateKind.failed:
-            sqlDumpImportSession = current.copyWith(
-              step: SqlDumpImportWizardStep.summary,
-              phase: SqlDumpImportJobPhase.failed,
-              error: update.message ?? 'SQL dump import failed.',
-            );
-            break;
-        }
-        _safeNotify();
-      },
-    );
+          switch (update.kind) {
+            case SqlDumpImportUpdateKind.progress:
+              sqlDumpImportSession = current.copyWith(
+                phase: current.phase == SqlDumpImportJobPhase.cancelling
+                    ? SqlDumpImportJobPhase.cancelling
+                    : SqlDumpImportJobPhase.running,
+                progress: update.progress,
+                error: null,
+              );
+              break;
+            case SqlDumpImportUpdateKind.completed:
+              sqlDumpImportSession = current.copyWith(
+                step: SqlDumpImportWizardStep.summary,
+                phase: SqlDumpImportJobPhase.completed,
+                summary: update.summary,
+                error: null,
+              );
+              workspaceMessage = update.summary?.statusMessage;
+              workspaceError = null;
+              break;
+            case SqlDumpImportUpdateKind.cancelled:
+              sqlDumpImportSession = current.copyWith(
+                step: SqlDumpImportWizardStep.summary,
+                phase: SqlDumpImportJobPhase.cancelled,
+                summary: update.summary,
+                error: null,
+              );
+              workspaceMessage = update.summary?.statusMessage;
+              workspaceError = null;
+              break;
+            case SqlDumpImportUpdateKind.failed:
+              sqlDumpImportSession = current.copyWith(
+                step: SqlDumpImportWizardStep.summary,
+                phase: SqlDumpImportJobPhase.failed,
+                error: update.message ?? 'SQL dump import failed.',
+              );
+              break;
+          }
+          _safeNotify();
+        });
   }
 
   Future<void> cancelSqlDumpImport() async {
@@ -2036,11 +2050,13 @@ class WorkspaceController extends ChangeNotifier {
     _safeNotify();
   }
 
-  Future<void> _persistConfig(String statusMessage) async {
+  Future<void> _persistConfig([String? statusMessage]) async {
     try {
       await _configStore.save(config);
-      workspaceMessage = statusMessage;
-      workspaceError = null;
+      if (statusMessage != null) {
+        workspaceMessage = statusMessage;
+        workspaceError = null;
+      }
     } catch (error) {
       workspaceError = error.toString();
       workspaceMessage = null;
@@ -2106,10 +2122,7 @@ class WorkspaceController extends ChangeNotifier {
       for (final table in session.tables)
         if (table.sourceName == sourceName) transform(table) else table,
     ];
-    sqlDumpImportSession = session.copyWith(
-      tables: updatedTables,
-      error: null,
-    );
+    sqlDumpImportSession = session.copyWith(tables: updatedTables, error: null);
     _safeNotify();
   }
 

@@ -1,4 +1,5 @@
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
+import 'package:decent_bench/features/workspace/domain/workspace_shell_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -14,6 +15,21 @@ void main() {
         formatUppercaseKeywords: false,
         indentSpaces: 4,
       ),
+      shellPreferences: const WorkspaceShellPreferences(
+        leftColumnFraction: 0.33,
+        leftTopFraction: 0.61,
+        rightTopFraction: 0.57,
+        showSchemaExplorer: true,
+        showPropertiesPane: false,
+        showResultsPane: true,
+        showStatusBar: false,
+        editorZoom: 1.1,
+        activeResultsTab: ResultsPaneTab.messages,
+      ),
+      shortcutBindings: <String, String>{
+        ...AppConfig.defaultShortcutBindings(),
+        'file_exit': 'Ctrl+Shift+Q',
+      },
       snippets: const <SqlSnippet>[
         SqlSnippet(
           id: 'custom',
@@ -29,6 +45,8 @@ void main() {
     final parsed = AppConfig.fromToml(toml);
 
     expect(toml, contains('editor_snippet_count = 1'));
+    expect(toml, contains('[layout]'));
+    expect(toml, contains('[shortcuts]'));
     expect(toml, contains('[[editor_snippets]]'));
     expect(parsed.configVersion, AppConfig.currentConfigVersion);
     expect(parsed.recentFiles, config.recentFiles);
@@ -39,6 +57,11 @@ void main() {
     expect(parsed.editorSettings.autocompleteMaxSuggestions, 20);
     expect(parsed.editorSettings.formatUppercaseKeywords, isFalse);
     expect(parsed.editorSettings.indentSpaces, 4);
+    expect(parsed.shellPreferences.leftColumnFraction, closeTo(0.33, 0.001));
+    expect(parsed.shellPreferences.showPropertiesPane, isFalse);
+    expect(parsed.shellPreferences.showStatusBar, isFalse);
+    expect(parsed.shellPreferences.activeResultsTab, ResultsPaneTab.messages);
+    expect(parsed.shortcutBindings['file_exit'], 'Ctrl+Shift+Q');
     expect(parsed.snippets.single.trigger, 'custom');
   });
 
@@ -65,6 +88,11 @@ recent_files = ["/tmp/example.ddb"]
     expect(parsed.configVersion, AppConfig.currentConfigVersion);
     expect(parsed.defaultPageSize, 500);
     expect(parsed.editorSettings.autocompleteEnabled, isTrue);
+    expect(parsed.shellPreferences, isNotNull);
+    expect(
+      parsed.shortcutBindings['tools_run_query'],
+      AppConfig.defaultShortcutBindings()['tools_run_query'],
+    );
     expect(parsed.snippets, isNotEmpty);
   });
 
