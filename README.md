@@ -5,32 +5,45 @@
 Decent Bench is a cross-platform desktop app (Flutter) for power users who need
 to work directly with **DecentDB**: open or create a database, inspect schema,
 run the full pinned DecentDB SQL surface, export shaped results, and import
-SQLite sources through a guided workflow.
+SQLite and Excel sources through guided workflows.
 
 ## Project status
 
-**Pre-alpha / active implementation.** Phase 4 is implemented and runnable
+**Pre-alpha / active implementation.** Phase 5 is implemented and runnable
 under `apps/decent-bench/`.
 
 Current engine capability baseline: **DecentDB v1.6.x**.
 
-### Implemented now (Phase 4)
+### Implemented now (Phase 5)
 
 - open an existing DecentDB file or create a new one
 - drag and drop a `.ddb` file to open it immediately
 - drag and drop a `.db`, `.sqlite`, or `.sqlite3` file to launch the SQLite
   import wizard
+- drag and drop an `.xlsx` file to launch the Excel import wizard
 - inspect SQLite sources in the background before import
+- inspect Excel workbooks in the background before import
 - run a six-step SQLite import wizard for source, target, preview, transforms,
+  execution, and summary
+- run a six-step Excel import wizard for source, target, preview, transforms,
   execution, and summary
 - select SQLite tables to import, rename target tables and columns, and apply
   per-column type overrides limited to DecentDB native types
+- select Excel worksheets to import, toggle header-row handling, rename target
+  tables and columns, and apply per-column type overrides limited to DecentDB
+  native types
 - map representative SQLite affinities to DecentDB types, including boolean,
   decimal, blob, and timestamp-oriented cases
+- infer representative Excel column types for integers, booleans, floats,
+  timestamps, and safe text fallbacks
 - preview sample SQLite rows before import and surface warnings for `STRICT`,
   `WITHOUT ROWID`, skipped composite indexes, and skipped foreign keys to
   unselected tables
+- preview sample Excel rows before import and surface warnings for formula-text
+  handling and unsupported legacy `.xls` workbooks
 - execute SQLite imports in a background worker with progress updates and
+  best-effort cancellation plus rollback-oriented summary messaging
+- execute Excel imports in a background worker with progress updates and
   best-effort cancellation plus rollback-oriented summary messaging
 - open the imported database or launch a starter query from the import summary
 - inspect schema metadata loaded through the DecentDB adapter for tables, views,
@@ -50,13 +63,13 @@ Current engine capability baseline: **DecentDB v1.6.x**.
 - persist recent files, export defaults, editor settings, and SQL snippets in
   TOML
 - persist workspace tab drafts separately from global config
-- run unit, smoke, widget, and integration tests for the Phase 4 workflow
+- run unit, smoke, widget, and integration tests for the Phase 5 workflow
 
 ### Not implemented yet
 
-- Excel import
 - SQL dump import
 - JSON, Parquet, and Excel export
+- legacy binary `.xls` workbook parsing
 
 For the full planned product scope, read:
 
@@ -211,6 +224,7 @@ Recent ADRs relevant to the current implementation:
 - [design/adr/0004-workspace-state-persistence.md](/home/steven/source/decent-bench/design/adr/0004-workspace-state-persistence.md)
 - [design/adr/0005-editor-config-and-snippet-persistence.md](/home/steven/source/decent-bench/design/adr/0005-editor-config-and-snippet-persistence.md)
 - [design/adr/0006-sqlite-import-entry-and-worker-architecture.md](/home/steven/source/decent-bench/design/adr/0006-sqlite-import-entry-and-worker-architecture.md)
+- [design/adr/0007-excel-import-parser-and-legacy-workbook-handling.md](/home/steven/source/decent-bench/design/adr/0007-excel-import-parser-and-legacy-workbook-handling.md)
 
 ## License
 

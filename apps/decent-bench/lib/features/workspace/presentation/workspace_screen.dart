@@ -12,6 +12,7 @@ import '../domain/sql_autocomplete.dart';
 import '../domain/sql_formatter.dart';
 import '../domain/workspace_file_entry.dart';
 import '../domain/workspace_models.dart';
+import 'excel_import_dialog.dart';
 import 'sqlite_import_dialog.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -95,7 +96,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final autocompleteResult = _autocompleteFor(controller);
 
         return DropTarget(
-          enable: !controller.hasSqliteImportSession,
+          enable: !controller.hasImportSession,
           onDragEntered: (_) {
             setState(() {
               _isDropTargetActive = true;
@@ -228,13 +229,30 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     controller.closeSqliteImportSession();
   }
 
+  Future<void> _showExcelImportDialog({String sourcePath = ''}) async {
+    final controller = widget.controller;
+    if (!controller.hasExcelImportSession || sourcePath.trim().isNotEmpty) {
+      controller.beginExcelImport(sourcePath: sourcePath);
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ExcelImportDialog(controller: controller),
+    );
+    if (!mounted) {
+      return;
+    }
+    controller.closeExcelImportSession();
+  }
+
   Future<void> _handleIncomingFiles(Iterable<String> rawPaths) async {
     final decision = decideWorkspaceIncomingFiles(rawPaths);
     final path = decision.primaryPath;
     if (path == null) {
       await _showIncomingFileNotice(
         title: 'No file detected',
-        message: 'Drop a local DecentDB or SQLite file to continue.',
+        message: 'Drop a local DecentDB, SQLite, or Excel file to continue.',
       );
       return;
     }
@@ -256,11 +274,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         await _showSqliteImportDialog(sourcePath: path);
         break;
       case WorkspaceIncomingFileKind.excel:
+        await _showExcelImportDialog(sourcePath: path);
+        break;
       case WorkspaceIncomingFileKind.sqlDump:
         await _showIncomingFileNotice(
           title: 'Import type not implemented yet',
           message:
-              '${p.basename(path)} was recognized, but Phase 4 only implements SQLite import. Excel and SQL dump imports remain scheduled for later phases.',
+              '${p.basename(path)} was recognized, but SQL dump import remains scheduled for a later phase.',
         );
         break;
       case WorkspaceIncomingFileKind.unknown:
@@ -299,7 +319,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     return PanelCard(
       title: 'Workspace',
       subtitle: controller.databasePath == null
-          ? 'Open a DecentDB file, create a new one, or import a dropped SQLite source.'
+          ? 'Open a DecentDB file, create a new one, or import a dropped SQLite or Excel source.'
           : controller.databasePath ?? '',
       actions: <Widget>[
         IconButton(
@@ -361,6 +381,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     : () => _showSqliteImportDialog(),
                 icon: const Icon(Icons.file_upload_outlined),
                 label: const Text('Import SQLite'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: controller.isOpeningDatabase
+                    ? null
+                    : () => _showExcelImportDialog(),
+                icon: const Icon(Icons.table_chart_outlined),
+                label: const Text('Import Excel'),
               ),
             ),
             const SizedBox(height: 16),

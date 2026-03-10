@@ -5,19 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../application/workspace_controller.dart';
+import '../domain/excel_import_models.dart';
 import '../domain/import_target_types.dart';
-import '../domain/sqlite_import_models.dart';
 
-class SqliteImportDialog extends StatefulWidget {
-  const SqliteImportDialog({super.key, required this.controller});
+class ExcelImportDialog extends StatefulWidget {
+  const ExcelImportDialog({super.key, required this.controller});
 
   final WorkspaceController controller;
 
   @override
-  State<SqliteImportDialog> createState() => _SqliteImportDialogState();
+  State<ExcelImportDialog> createState() => _ExcelImportDialogState();
 }
 
-class _SqliteImportDialogState extends State<SqliteImportDialog> {
+class _ExcelImportDialogState extends State<ExcelImportDialog> {
   late final TextEditingController _sourcePathController =
       TextEditingController();
   late final TextEditingController _targetPathController =
@@ -35,14 +35,14 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
-        final session = widget.controller.sqliteImportSession;
+        final session = widget.controller.excelImportSession;
         if (session == null) {
           return const SizedBox.shrink();
         }
         _syncControllers(session);
 
         return AlertDialog(
-          title: const Text('SQLite Import Wizard'),
+          title: const Text('Excel Import Wizard'),
           content: SizedBox(
             width: 1080,
             height: 720,
@@ -60,7 +60,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
                   const SizedBox(height: 12),
                 ],
                 if (session.warnings.isNotEmpty &&
-                    session.step != SqliteImportWizardStep.summary) ...<Widget>[
+                    session.step != ExcelImportWizardStep.summary) ...<Widget>[
                   _DialogBanner(
                     color: Theme.of(context).colorScheme.tertiaryContainer,
                     icon: Icons.warning_amber_rounded,
@@ -78,12 +78,12 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildStepHeader(SqliteImportSession session) {
+  Widget _buildStepHeader(ExcelImportSession session) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: <Widget>[
-        for (final step in SqliteImportWizardStep.values)
+        for (final step in ExcelImportWizardStep.values)
           ChoiceChip(
             label: Text(_stepLabel(step)),
             selected: session.step == step,
@@ -91,7 +91,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
               if (!selected) {
                 return;
               }
-              widget.controller.setSqliteImportStep(step);
+              widget.controller.setExcelImportStep(step);
             },
           ),
         Chip(label: Text('Phase: ${session.phase.name}')),
@@ -99,23 +99,23 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildStepBody(SqliteImportSession session) {
+  Widget _buildStepBody(ExcelImportSession session) {
     return switch (session.step) {
-      SqliteImportWizardStep.source => _buildSourceStep(session),
-      SqliteImportWizardStep.target => _buildTargetStep(session),
-      SqliteImportWizardStep.preview => _buildPreviewStep(session),
-      SqliteImportWizardStep.transforms => _buildTransformsStep(session),
-      SqliteImportWizardStep.execute => _buildExecuteStep(session),
-      SqliteImportWizardStep.summary => _buildSummaryStep(session),
+      ExcelImportWizardStep.source => _buildSourceStep(session),
+      ExcelImportWizardStep.target => _buildTargetStep(session),
+      ExcelImportWizardStep.preview => _buildPreviewStep(session),
+      ExcelImportWizardStep.transforms => _buildTransformsStep(session),
+      ExcelImportWizardStep.execute => _buildExecuteStep(session),
+      ExcelImportWizardStep.summary => _buildSummaryStep(session),
     };
   }
 
-  Widget _buildSourceStep(SqliteImportSession session) {
+  Widget _buildSourceStep(ExcelImportSession session) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Select a SQLite source file. The wizard will inspect tables, row counts, indexes, and foreign keys before import.',
+          'Select an Excel workbook, choose whether the first non-empty row contains headers, and inspect available worksheets before import.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
@@ -125,8 +125,8 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
               child: TextField(
                 controller: _sourcePathController,
                 decoration: const InputDecoration(
-                  labelText: 'SQLite source path',
-                  hintText: '/tmp/source.sqlite',
+                  labelText: 'Excel source path',
+                  hintText: '/tmp/source.xlsx',
                 ),
               ),
             ),
@@ -137,26 +137,42 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
             ),
             const SizedBox(width: 12),
             FilledButton(
-              onPressed: session.phase == SqliteImportJobPhase.inspecting
+              onPressed: session.phase == ExcelImportJobPhase.inspecting
                   ? null
-                  : () => widget.controller.loadSqliteImportSource(
+                  : () => widget.controller.loadExcelImportSource(
                       _sourcePathController.text,
                     ),
               child: Text(
-                session.phase == SqliteImportJobPhase.inspecting
+                session.phase == ExcelImportJobPhase.inspecting
                     ? 'Inspecting...'
-                    : 'Inspect Source',
+                    : 'Inspect Workbook',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: session.headerRow,
+          onChanged: session.phase == ExcelImportJobPhase.inspecting
+              ? null
+              : (value) {
+                  if (value != null) {
+                    widget.controller.updateExcelImportHeaderRow(value);
+                  }
+                },
+          title: const Text('Treat the first non-empty row as column headers'),
+          subtitle: const Text(
+            'Turn this off to import generic column names like `column_1`.',
+          ),
+        ),
+        const SizedBox(height: 16),
         Expanded(
-          child: session.tables.isEmpty
+          child: session.sheets.isEmpty
               ? const _DialogEmptyState(
-                  title: 'No SQLite schema loaded yet',
+                  title: 'No workbook loaded yet',
                   message:
-                      'Choose a SQLite file to inspect tables, preview rows, and configure the target DecentDB import.',
+                      'Choose an `.xlsx` file to inspect worksheets, infer column types, and preview sample rows.',
                 )
               : DecoratedBox(
                   decoration: BoxDecoration(
@@ -165,19 +181,17 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
                   ),
                   child: ListView.separated(
                     padding: const EdgeInsets.all(12),
-                    itemCount: session.tables.length,
+                    itemCount: session.sheets.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
-                      final table = session.tables[index];
+                      final sheet = session.sheets[index];
                       return ListTile(
-                        title: Text(table.sourceName),
+                        title: Text(sheet.sourceName),
                         subtitle: Text(
-                          '${table.rowCount} rows | ${table.columns.length} columns'
-                          '${table.strict ? ' | STRICT' : ''}'
-                          '${table.withoutRowId ? ' | WITHOUT ROWID' : ''}',
+                          '${sheet.rowCount} rows | ${sheet.columns.length} columns',
                         ),
                         trailing: Icon(
-                          table.selected
+                          sheet.selected
                               ? Icons.check_circle_rounded
                               : Icons.radio_button_unchecked_rounded,
                         ),
@@ -190,12 +204,12 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildTargetStep(SqliteImportSession session) {
+  Widget _buildTargetStep(ExcelImportSession session) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Choose where the imported SQLite tables should land. Create a new DecentDB file or import into an existing one.',
+          'Choose where the imported workbook sheets should land. Create a new DecentDB file or import into an existing one.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
@@ -214,7 +228,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
           ],
           selected: <bool>{session.importIntoExistingTarget},
           onSelectionChanged: (selection) {
-            widget.controller.updateSqliteImportIntoExistingTarget(
+            widget.controller.updateExcelImportIntoExistingTarget(
               selection.first,
             );
           },
@@ -225,7 +239,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
             Expanded(
               child: TextField(
                 controller: _targetPathController,
-                onChanged: widget.controller.updateSqliteImportTargetPath,
+                onChanged: widget.controller.updateExcelImportTargetPath,
                 decoration: const InputDecoration(
                   labelText: 'DecentDB target path',
                   hintText: '/tmp/import.ddb',
@@ -247,17 +261,17 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
             contentPadding: EdgeInsets.zero,
             value: session.replaceExistingTarget,
             onChanged: (value) => widget.controller
-                .updateSqliteImportReplaceExistingTarget(value ?? false),
+                .updateExcelImportReplaceExistingTarget(value ?? false),
             title: const Text('Replace target file if it already exists'),
           ),
         const SizedBox(height: 20),
         _SummaryGrid(
           rows: <(String, String)>[
             ('Source', p.basename(session.sourcePath)),
-            ('Selected tables', '${session.selectedTables.length}'),
+            ('Selected sheets', '${session.selectedSheets.length}'),
             (
               'Rows selected',
-              '${session.selectedTables.fold<int>(0, (sum, table) => sum + table.rowCount)}',
+              '${session.selectedSheets.fold<int>(0, (sum, sheet) => sum + sheet.rowCount)}',
             ),
           ],
         ),
@@ -265,22 +279,22 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildPreviewStep(SqliteImportSession session) {
-    return _TableSplitView(
-      tableList: _buildTableList(session),
+  Widget _buildPreviewStep(ExcelImportSession session) {
+    return _SheetSplitView(
+      sheetList: _buildSheetList(session),
       detail: _buildPreviewDetail(session),
     );
   }
 
-  Widget _buildTransformsStep(SqliteImportSession session) {
-    final focused = session.focusedTableDraft;
-    return _TableSplitView(
-      tableList: _buildTableList(session),
+  Widget _buildTransformsStep(ExcelImportSession session) {
+    final focused = session.focusedSheetDraft;
+    return _SheetSplitView(
+      sheetList: _buildSheetList(session),
       detail: focused == null
           ? const _DialogEmptyState(
-              title: 'No table selected',
+              title: 'No worksheet selected',
               message:
-                  'Choose at least one SQLite table to configure names and target types.',
+                  'Choose at least one worksheet to configure table names and target column types.',
             )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(12),
@@ -293,10 +307,10 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
-                    key: ValueKey<String>('table-${focused.sourceName}'),
+                    key: ValueKey<String>('sheet-${focused.sourceName}'),
                     initialValue: focused.targetName,
                     onChanged: (value) => widget.controller
-                        .renameSqliteImportTable(focused.sourceName, value),
+                        .renameExcelImportSheet(focused.sourceName, value),
                     decoration: const InputDecoration(
                       labelText: 'Target table name',
                     ),
@@ -309,18 +323,18 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
                   const SizedBox(height: 8),
                   for (final column in focused.columns) ...<Widget>[
                     _ColumnTransformRow(
-                      tableName: focused.sourceName,
+                      sheetName: focused.sourceName,
                       column: column,
                       onRename: (value) =>
-                          widget.controller.renameSqliteImportColumn(
+                          widget.controller.renameExcelImportColumn(
                             focused.sourceName,
-                            column.sourceName,
+                            column.sourceIndex,
                             value,
                           ),
                       onTypeChanged: (value) =>
-                          widget.controller.overrideSqliteImportColumnType(
+                          widget.controller.overrideExcelImportColumnType(
                             focused.sourceName,
-                            column.sourceName,
+                            column.sourceIndex,
                             value,
                           ),
                     ),
@@ -332,11 +346,11 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildExecuteStep(SqliteImportSession session) {
+  Widget _buildExecuteStep(ExcelImportSession session) {
     final progress = session.progress;
-    final totalRows = session.selectedTables.fold<int>(
+    final totalRows = session.selectedSheets.fold<int>(
       0,
-      (sum, table) => sum + table.rowCount,
+      (sum, sheet) => sum + sheet.rowCount,
     );
     final denominator = math.max(1, totalRows);
     final progressValue = progress == null
@@ -347,7 +361,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Run the SQLite import in a background isolate. The target DecentDB import is transactional for this phase, so cancel or failure will roll back the job.',
+          'Run the Excel import in a background isolate. The target DecentDB import is transactional for this phase, so cancel or failure will roll back the job.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 20),
@@ -355,85 +369,88 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
           rows: <(String, String)>[
             ('Source', p.basename(session.sourcePath)),
             ('Target', p.basename(session.targetPath)),
-            ('Tables', '${session.selectedTables.length}'),
+            ('Sheets', '${session.selectedSheets.length}'),
             ('Rows selected', '$totalRows'),
           ],
         ),
-        const SizedBox(height: 24),
-        LinearProgressIndicator(value: progressValue.clamp(0, 1)),
+        const SizedBox(height: 20),
+        LinearProgressIndicator(value: progressValue.clamp(0.0, 1.0)),
         const SizedBox(height: 12),
-        Text(progress?.message ?? 'Ready to start the SQLite import.'),
+        Text(progress?.message ?? 'Waiting to start...'),
         if (progress != null) ...<Widget>[
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
-            '${progress.currentTableRowsCopied}/${progress.currentTableRowCount} rows copied for ${progress.currentTable}',
-          ),
-          Text(
-            '${progress.completedTables}/${progress.totalTables} tables completed',
+            'Sheet ${progress.completedSheets + 1} of ${progress.totalSheets}: '
+            '${progress.currentSheetRowsCopied}/${progress.currentSheetRowCount} rows',
           ),
         ],
       ],
     );
   }
 
-  Widget _buildSummaryStep(SqliteImportSession session) {
+  Widget _buildSummaryStep(ExcelImportSession session) {
     final summary = session.summary;
     if (summary == null) {
-      return _DialogEmptyState(
-        title: session.phase == SqliteImportJobPhase.failed
-            ? 'Import failed'
-            : 'Import summary unavailable',
-        message: session.error ?? 'The import did not produce a summary.',
+      return const _DialogEmptyState(
+        title: 'No summary available',
+        message: 'Run an Excel import to populate the summary view.',
       );
     }
 
     return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          _DialogBanner(
-            color: session.phase == SqliteImportJobPhase.completed
-                ? Theme.of(context).colorScheme.secondaryContainer
-                : Theme.of(context).colorScheme.tertiaryContainer,
-            icon: session.phase == SqliteImportJobPhase.completed
-                ? Icons.check_circle_outline_rounded
-                : Icons.warning_amber_rounded,
-            text: summary.statusMessage,
+          Text(
+            summary.statusMessage,
+            style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 16),
           _SummaryGrid(
             rows: <(String, String)>[
-              ('Source', summary.sourcePath),
-              ('Target', summary.targetPath),
+              ('Source', p.basename(summary.sourcePath)),
+              ('Target', p.basename(summary.targetPath)),
               ('Imported tables', '${summary.importedTables.length}'),
               ('Rows copied', '${summary.totalRowsCopied}'),
-              ('Indexes created', '${summary.indexesCreated.length}'),
               ('Rolled back', summary.rolledBack ? 'Yes' : 'No'),
             ],
           ),
-          if (summary.warnings.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          Text(
+            'Imported tables',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          if (summary.importedTables.isEmpty)
+            const Text('No tables were imported.')
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                for (final table in summary.importedTables)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '$table | ${summary.rowsCopiedByTable[table] ?? 0} rows',
+                    ),
+                  ),
+              ],
+            ),
+          if (summary.warnings.isNotEmpty ||
+              session.warnings.isNotEmpty ||
+              session.error != null) ...<Widget>[
             const SizedBox(height: 16),
             Text('Warnings', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
-            for (final warning in summary.warnings)
+            for (final warning in <String>[
+              ...session.warnings,
+              ...summary.warnings,
+              if (session.error != null) session.error!,
+            ])
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(warning),
-              ),
-          ],
-          if (summary.skippedItems.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 16),
-            Text(
-              'Skipped items',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            for (final item in summary.skippedItems)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${item.tableName == null ? item.name : '${item.tableName}.${item.name}'}: ${item.reason}',
-                ),
               ),
           ],
         ],
@@ -441,82 +458,54 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     );
   }
 
-  Widget _buildTableList(SqliteImportSession session) {
-    if (session.tables.isEmpty) {
-      return const _DialogEmptyState(
-        title: 'No tables loaded',
-        message: 'Inspect a SQLite source file first.',
-      );
-    }
-
+  Widget _buildSheetList(ExcelImportSession session) {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
       ),
       child: ListView.separated(
-        padding: const EdgeInsets.all(8),
-        itemCount: session.tables.length,
+        padding: const EdgeInsets.all(12),
+        itemCount: session.sheets.length,
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, index) {
-          final table = session.tables[index];
-          final isFocused = table.sourceName == session.focusedTable;
-          return Material(
-            color: isFocused
-                ? Theme.of(context).colorScheme.secondaryContainer
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () =>
-                  widget.controller.focusSqliteImportTable(table.sourceName),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Row(
-                  children: <Widget>[
-                    Checkbox(
-                      value: table.selected,
-                      onChanged: (value) =>
-                          widget.controller.toggleSqliteImportTableSelection(
-                            table.sourceName,
-                            value ?? false,
-                          ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(table.sourceName),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${table.rowCount} rows | ${table.columns.length} cols',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+          final sheet = session.sheets[index];
+          return CheckboxListTile(
+            value: sheet.selected,
+            onChanged: sheet.columns.isEmpty
+                ? null
+                : (value) => widget.controller.toggleExcelImportSheetSelection(
+                    sheet.sourceName,
+                    value ?? false,
+                  ),
+            title: Text(sheet.sourceName),
+            subtitle: Text(
+              '${sheet.rowCount} rows | ${sheet.columns.length} columns',
+            ),
+            secondary: IconButton(
+              tooltip: 'Focus worksheet details',
+              onPressed: () =>
+                  widget.controller.focusExcelImportSheet(sheet.sourceName),
+              icon: Icon(
+                session.focusedSheet == sheet.sourceName
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_outlined,
               ),
             ),
+            controlAffinity: ListTileControlAffinity.leading,
           );
         },
       ),
     );
   }
 
-  Widget _buildPreviewDetail(SqliteImportSession session) {
-    final focused = session.focusedTableDraft;
+  Widget _buildPreviewDetail(ExcelImportSession session) {
+    final focused = session.focusedSheetDraft;
     if (focused == null) {
       return const _DialogEmptyState(
-        title: 'No table selected',
-        message: 'Choose a SQLite table to preview sample rows.',
+        title: 'No worksheet selected',
+        message: 'Choose a worksheet from the list to inspect sample rows.',
       );
-    }
-
-    if (session.loadingPreviewTable == focused.sourceName &&
-        !focused.previewLoaded) {
-      return const Center(child: CircularProgressIndicator());
     }
 
     return SingleChildScrollView(
@@ -534,11 +523,10 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
             runSpacing: 8,
             children: <Widget>[
               Chip(label: Text('${focused.rowCount} rows')),
-              if (focused.strict) const Chip(label: Text('STRICT')),
-              if (focused.withoutRowId)
-                const Chip(label: Text('WITHOUT ROWID')),
-              if (focused.hasCompositePrimaryKey)
-                const Chip(label: Text('Composite PK')),
+              Chip(label: Text('${focused.columns.length} columns')),
+              Chip(
+                label: Text(session.headerRow ? 'Headers On' : 'Headers Off'),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -548,34 +536,27 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
-                '${column.sourceName} | ${column.declaredType.isEmpty ? 'untyped' : column.declaredType} -> ${column.targetType}'
-                '${column.primaryKey ? ' | PK' : ''}'
-                '${column.unique ? ' | UNIQUE' : ''}'
-                '${column.notNull ? ' | NOT NULL' : ''}',
+                '${column.sourceName} -> ${column.targetType}'
+                '${column.containsNulls ? ' | nullable' : ''}',
               ),
             ),
           const SizedBox(height: 14),
           Text('Sample rows', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
-          if (focused.previewError != null)
-            Text(focused.previewError!)
-          else if (focused.previewRows.isEmpty)
+          if (focused.previewRows.isEmpty)
             const Text('No sample rows available.')
           else
-            _PreviewTable(table: focused),
+            _PreviewTable(sheet: focused),
         ],
       ),
     );
   }
 
-  List<Widget> _buildActions(
-    BuildContext context,
-    SqliteImportSession session,
-  ) {
+  List<Widget> _buildActions(BuildContext context, ExcelImportSession session) {
     final actions = <Widget>[
       TextButton(
         onPressed: () {
-          widget.controller.closeSqliteImportSession();
+          widget.controller.closeExcelImportSession();
           Navigator.of(context).pop();
         },
         child: const Text('Close'),
@@ -583,23 +564,23 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     ];
 
     switch (session.step) {
-      case SqliteImportWizardStep.source:
+      case ExcelImportWizardStep.source:
         actions.add(
           FilledButton(
             onPressed: session.canAdvanceFromSource
-                ? () => widget.controller.setSqliteImportStep(
-                    SqliteImportWizardStep.target,
+                ? () => widget.controller.setExcelImportStep(
+                    ExcelImportWizardStep.target,
                   )
                 : null,
             child: const Text('Next'),
           ),
         );
         break;
-      case SqliteImportWizardStep.target:
+      case ExcelImportWizardStep.target:
         actions.add(
           TextButton(
-            onPressed: () => widget.controller.setSqliteImportStep(
-              SqliteImportWizardStep.source,
+            onPressed: () => widget.controller.setExcelImportStep(
+              ExcelImportWizardStep.source,
             ),
             child: const Text('Back'),
           ),
@@ -607,19 +588,19 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
         actions.add(
           FilledButton(
             onPressed: session.canAdvanceFromTarget
-                ? () => widget.controller.setSqliteImportStep(
-                    SqliteImportWizardStep.preview,
+                ? () => widget.controller.setExcelImportStep(
+                    ExcelImportWizardStep.preview,
                   )
                 : null,
             child: const Text('Next'),
           ),
         );
         break;
-      case SqliteImportWizardStep.preview:
+      case ExcelImportWizardStep.preview:
         actions.add(
           TextButton(
-            onPressed: () => widget.controller.setSqliteImportStep(
-              SqliteImportWizardStep.target,
+            onPressed: () => widget.controller.setExcelImportStep(
+              ExcelImportWizardStep.target,
             ),
             child: const Text('Back'),
           ),
@@ -627,53 +608,53 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
         actions.add(
           FilledButton(
             onPressed: session.canAdvanceFromPreview
-                ? () => widget.controller.setSqliteImportStep(
-                    SqliteImportWizardStep.transforms,
+                ? () => widget.controller.setExcelImportStep(
+                    ExcelImportWizardStep.transforms,
                   )
                 : null,
             child: const Text('Next'),
           ),
         );
         break;
-      case SqliteImportWizardStep.transforms:
+      case ExcelImportWizardStep.transforms:
         actions.add(
           TextButton(
-            onPressed: () => widget.controller.setSqliteImportStep(
-              SqliteImportWizardStep.preview,
+            onPressed: () => widget.controller.setExcelImportStep(
+              ExcelImportWizardStep.preview,
             ),
             child: const Text('Back'),
           ),
         );
         actions.add(
           FilledButton(
-            onPressed: widget.controller.runSqliteImport,
+            onPressed: widget.controller.runExcelImport,
             child: const Text('Start Import'),
           ),
         );
         break;
-      case SqliteImportWizardStep.execute:
+      case ExcelImportWizardStep.execute:
         actions.add(
           FilledButton.tonal(
             onPressed:
-                session.phase == SqliteImportJobPhase.running ||
-                    session.phase == SqliteImportJobPhase.cancelling
-                ? widget.controller.cancelSqliteImport
+                session.phase == ExcelImportJobPhase.running ||
+                    session.phase == ExcelImportJobPhase.cancelling
+                ? widget.controller.cancelExcelImport
                 : null,
             child: Text(
-              session.phase == SqliteImportJobPhase.cancelling
+              session.phase == ExcelImportJobPhase.cancelling
                   ? 'Cancelling...'
                   : 'Cancel Import',
             ),
           ),
         );
         break;
-      case SqliteImportWizardStep.summary:
+      case ExcelImportWizardStep.summary:
         if (session.summary?.firstImportedTable != null &&
-            session.phase == SqliteImportJobPhase.completed) {
+            session.phase == ExcelImportJobPhase.completed) {
           actions.add(
             TextButton(
               onPressed: () async {
-                await widget.controller.openImportedDatabaseFromSummary();
+                await widget.controller.openExcelImportedDatabaseFromSummary();
                 if (context.mounted) {
                   Navigator.of(context).pop();
                 }
@@ -684,7 +665,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
           actions.add(
             FilledButton(
               onPressed: () async {
-                await widget.controller.runQueryForImportedTable();
+                await widget.controller.runQueryForExcelImportedTable();
                 if (context.mounted) {
                   Navigator.of(context).pop();
                 }
@@ -701,18 +682,18 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
 
   Future<void> _browseSourceFile() async {
     const typeGroup = XTypeGroup(
-      label: 'sqlite',
-      extensions: <String>['db', 'sqlite', 'sqlite3'],
+      label: 'excel',
+      extensions: <String>['xlsx', 'xls'],
     );
     final file = await openFile(acceptedTypeGroups: <XTypeGroup>[typeGroup]);
     if (file == null) {
       return;
     }
     _sourcePathController.text = file.path;
-    await widget.controller.loadSqliteImportSource(file.path);
+    await widget.controller.loadExcelImportSource(file.path);
   }
 
-  Future<void> _browseTarget(SqliteImportSession session) async {
+  Future<void> _browseTarget(ExcelImportSession session) async {
     if (session.importIntoExistingTarget) {
       const typeGroup = XTypeGroup(
         label: 'decentdb',
@@ -723,7 +704,7 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
         return;
       }
       _targetPathController.text = file.path;
-      widget.controller.updateSqliteImportTargetPath(file.path);
+      widget.controller.updateExcelImportTargetPath(file.path);
       return;
     }
 
@@ -738,10 +719,10 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
       return;
     }
     _targetPathController.text = result.path;
-    widget.controller.updateSqliteImportTargetPath(result.path);
+    widget.controller.updateExcelImportTargetPath(result.path);
   }
 
-  void _syncControllers(SqliteImportSession session) {
+  void _syncControllers(ExcelImportSession session) {
     if (_sourcePathController.text != session.sourcePath) {
       _sourcePathController.text = session.sourcePath;
     }
@@ -750,22 +731,22 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
     }
   }
 
-  String _stepLabel(SqliteImportWizardStep step) {
+  String _stepLabel(ExcelImportWizardStep step) {
     return switch (step) {
-      SqliteImportWizardStep.source => 'Source',
-      SqliteImportWizardStep.target => 'Target',
-      SqliteImportWizardStep.preview => 'Preview',
-      SqliteImportWizardStep.transforms => 'Transforms',
-      SqliteImportWizardStep.execute => 'Execute',
-      SqliteImportWizardStep.summary => 'Summary',
+      ExcelImportWizardStep.source => 'Source',
+      ExcelImportWizardStep.target => 'Target',
+      ExcelImportWizardStep.preview => 'Preview',
+      ExcelImportWizardStep.transforms => 'Transforms',
+      ExcelImportWizardStep.execute => 'Execute',
+      ExcelImportWizardStep.summary => 'Summary',
     };
   }
 }
 
-class _TableSplitView extends StatelessWidget {
-  const _TableSplitView({required this.tableList, required this.detail});
+class _SheetSplitView extends StatelessWidget {
+  const _SheetSplitView({required this.sheetList, required this.detail});
 
-  final Widget tableList;
+  final Widget sheetList;
   final Widget detail;
 
   @override
@@ -775,7 +756,7 @@ class _TableSplitView extends StatelessWidget {
         if (constraints.maxWidth < 860) {
           return Column(
             children: <Widget>[
-              SizedBox(height: 220, child: tableList),
+              SizedBox(height: 220, child: sheetList),
               const SizedBox(height: 12),
               Expanded(child: detail),
             ],
@@ -783,7 +764,7 @@ class _TableSplitView extends StatelessWidget {
         }
         return Row(
           children: <Widget>[
-            SizedBox(width: 280, child: tableList),
+            SizedBox(width: 300, child: sheetList),
             const SizedBox(width: 16),
             Expanded(child: detail),
           ],
@@ -795,14 +776,14 @@ class _TableSplitView extends StatelessWidget {
 
 class _ColumnTransformRow extends StatelessWidget {
   const _ColumnTransformRow({
-    required this.tableName,
+    required this.sheetName,
     required this.column,
     required this.onRename,
     required this.onTypeChanged,
   });
 
-  final String tableName;
-  final SqliteImportColumnDraft column;
+  final String sheetName;
+  final ExcelImportColumnDraft column;
   final ValueChanged<String> onRename;
   final ValueChanged<String> onTypeChanged;
 
@@ -823,11 +804,11 @@ class _ColumnTransformRow extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('$tableName.${column.sourceName}'),
+            Text('$sheetName.${column.sourceName}'),
             const SizedBox(height: 4),
             Text(
-              'Declared: ${column.declaredType.isEmpty ? 'untyped' : column.declaredType}'
-              ' | Suggested: ${column.inferredTargetType}',
+              'Suggested: ${column.inferredTargetType}'
+              '${column.containsNulls ? ' | nullable' : ''}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -836,7 +817,7 @@ class _ColumnTransformRow extends StatelessWidget {
                 Expanded(
                   child: TextFormField(
                     key: ValueKey<String>(
-                      'rename-$tableName-${column.sourceName}',
+                      'rename-$sheetName-${column.sourceIndex}',
                     ),
                     initialValue: column.targetName,
                     onChanged: onRename,
@@ -876,13 +857,13 @@ class _ColumnTransformRow extends StatelessWidget {
 }
 
 class _PreviewTable extends StatelessWidget {
-  const _PreviewTable({required this.table});
+  const _PreviewTable({required this.sheet});
 
-  final SqliteImportTableDraft table;
+  final ExcelImportSheetDraft sheet;
 
   @override
   Widget build(BuildContext context) {
-    final columnWidths = table.columns.length * 180.0;
+    final columnWidths = sheet.columns.length * 180.0;
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
@@ -891,16 +872,18 @@ class _PreviewTable extends StatelessWidget {
             width: math.max(constraints.maxWidth, columnWidths),
             child: DataTable(
               columns: <DataColumn>[
-                for (final column in table.columns)
+                for (final column in sheet.columns)
                   DataColumn(label: Text(column.targetName)),
               ],
               rows: <DataRow>[
-                for (final row in table.previewRows)
+                for (final row in sheet.previewRows)
                   DataRow(
                     cells: <DataCell>[
-                      for (final column in table.columns)
+                      for (final column in sheet.columns)
                         DataCell(
-                          Text(formatImportCellValue(row[column.sourceName])),
+                          Text(
+                            formatExcelImportCellValue(row[column.sourceName]),
+                          ),
                         ),
                     ],
                   ),
@@ -926,26 +909,24 @@ class _SummaryGrid extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            for (final row in rows)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: <Widget>[
-                    SizedBox(
-                      width: 140,
-                      child: Text(
-                        row.$1,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
+            for (var i = 0; i < rows.length; i++) ...<Widget>[
+              Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 180,
+                    child: Text(
+                      rows[i].$1,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    Expanded(child: Text(row.$2)),
-                  ],
-                ),
+                  ),
+                  Expanded(child: SelectableText(rows[i].$2)),
+                ],
               ),
+              if (i + 1 < rows.length) const Divider(height: 16),
+            ],
           ],
         ),
       ),
@@ -977,7 +958,7 @@ class _DialogBanner extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Icon(icon),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(child: Text(text)),
           ],
         ),
@@ -1000,12 +981,18 @@ class _DialogEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            Icon(
+              Icons.table_chart_outlined,
+              size: 40,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
               message,
-              textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
             ),
           ],
         ),

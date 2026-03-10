@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
+import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -118,6 +119,75 @@ void main() {
     expect(secondController.activeTab.exportPath, '/tmp/projects.csv');
     secondController.previousTab();
     expect(secondController.activeTab.parameterJson, '[1]');
+  });
+
+  test(
+    'excel import inspection loads sheets, previews, and import summary',
+    () async {
+      final gateway = FakeWorkspaceGateway();
+      final controller = WorkspaceController(
+        gateway: gateway,
+        configStore: InMemoryConfigStore(),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+      await controller.initialize();
+
+      controller.beginExcelImport();
+      await controller.loadExcelImportSource('/tmp/phase5-source.xlsx');
+
+      final session = controller.excelImportSession;
+      expect(session, isNotNull);
+      expect(session!.phase, ExcelImportJobPhase.ready);
+      expect(
+        session.sheets.map((sheet) => sheet.sourceName),
+        contains('people'),
+      );
+      expect(session.focusedSheetDraft?.previewRows.first['name'], 'Ada');
+
+      controller.setExcelImportStep(ExcelImportWizardStep.transforms);
+      controller.renameExcelImportSheet('people', 'imported_people');
+      controller.renameExcelImportColumn('people', 1, 'display_name');
+      await controller.runExcelImport();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(gateway.lastExcelImportRequest, isNotNull);
+      expect(
+        gateway.lastExcelImportRequest!.selectedSheets.first.targetName,
+        'imported_people',
+      );
+      expect(
+        controller.excelImportSession?.phase,
+        ExcelImportJobPhase.completed,
+      );
+      expect(
+        controller.excelImportSession?.summary?.importedTables,
+        contains('imported_people'),
+      );
+    },
+  );
+
+  test('excel import cancellation updates session state', () async {
+    final gateway = FakeWorkspaceGateway()..holdExcelImportOpen = true;
+    final controller = WorkspaceController(
+      gateway: gateway,
+      configStore: InMemoryConfigStore(),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+    await controller.initialize();
+    controller.beginExcelImport();
+    await controller.loadExcelImportSource('/tmp/phase5-cancel.xlsx');
+
+    await controller.runExcelImport();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controller.excelImportSession?.phase, ExcelImportJobPhase.running);
+
+    final jobId = controller.excelImportSession?.jobId;
+    await controller.cancelExcelImport();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(gateway.lastCancelledImportJobId, jobId);
+    expect(controller.excelImportSession?.phase, ExcelImportJobPhase.cancelled);
+    expect(controller.excelImportSession?.summary?.rolledBack, isTrue);
   });
 
   test(

@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/infrastructure/decentdb_bridge.dart';
 import 'package:decent_bench/features/workspace/infrastructure/native_library_resolver.dart';
+import 'package:excel/excel.dart' as xls;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite;
@@ -132,6 +134,77 @@ CREATE TABLE blob_samples (
       } finally {
         source.close();
       }
+      return sourcePath;
+    }
+
+    String createExcelSource(String filename) {
+      final sourcePath = p.join(tempDir.path, filename);
+      final workbook = xls.Excel.createExcel();
+      workbook.rename('Sheet1', 'people');
+
+      final people = workbook['people'];
+      people.cell(xls.CellIndex.indexByString('A1')).value = xls.TextCellValue(
+        'id',
+      );
+      people.cell(xls.CellIndex.indexByString('B1')).value = xls.TextCellValue(
+        'name',
+      );
+      people.cell(xls.CellIndex.indexByString('C1')).value = xls.TextCellValue(
+        'active',
+      );
+      people.cell(xls.CellIndex.indexByString('D1')).value = xls.TextCellValue(
+        'created_at',
+      );
+      people.cell(xls.CellIndex.indexByString('A2')).value = xls.IntCellValue(
+        1,
+      );
+      people.cell(xls.CellIndex.indexByString('B2')).value = xls.TextCellValue(
+        'Ada',
+      );
+      people.cell(xls.CellIndex.indexByString('C2')).value = xls.BoolCellValue(
+        true,
+      );
+      people.cell(xls.CellIndex.indexByString('D2')).value =
+          xls.DateTimeCellValue.fromDateTime(DateTime.utc(2026, 3, 10, 12, 0));
+      people.cell(xls.CellIndex.indexByString('A3')).value = xls.IntCellValue(
+        2,
+      );
+      people.cell(xls.CellIndex.indexByString('B3')).value = xls.TextCellValue(
+        'Grace',
+      );
+      people.cell(xls.CellIndex.indexByString('C3')).value = xls.BoolCellValue(
+        false,
+      );
+      people.cell(xls.CellIndex.indexByString('D3')).value =
+          xls.DateTimeCellValue.fromDateTime(DateTime.utc(2026, 3, 11, 9, 30));
+
+      final metrics = workbook['metrics'];
+      metrics.cell(xls.CellIndex.indexByString('A1')).value = xls.TextCellValue(
+        'quarter',
+      );
+      metrics.cell(xls.CellIndex.indexByString('B1')).value = xls.TextCellValue(
+        'revenue',
+      );
+      metrics.cell(xls.CellIndex.indexByString('C1')).value = xls.TextCellValue(
+        'calculated',
+      );
+      metrics.cell(xls.CellIndex.indexByString('A2')).value = xls.TextCellValue(
+        'Q1',
+      );
+      metrics.cell(xls.CellIndex.indexByString('B2')).value =
+          xls.DoubleCellValue(1200.5);
+      metrics.cell(xls.CellIndex.indexByString('C2')).value =
+          const xls.FormulaCellValue('SUM(B2)');
+      metrics.cell(xls.CellIndex.indexByString('A3')).value = xls.TextCellValue(
+        'Q2',
+      );
+      metrics.cell(xls.CellIndex.indexByString('B3')).value =
+          xls.DoubleCellValue(1800.25);
+      metrics.cell(xls.CellIndex.indexByString('C3')).value =
+          const xls.FormulaCellValue('SUM(B3)');
+
+      final bytes = workbook.save();
+      File(sourcePath).writeAsBytesSync(bytes!);
       return sourcePath;
     }
 
@@ -597,6 +670,92 @@ ORDER BY n.id
           ),
           isTrue,
         );
+      },
+    );
+
+    test(
+      'inspects Excel workbooks and imports selected sheets',
+      skip: skipReason,
+      () async {
+        final sourcePath = createExcelSource('phase5-source.xlsx');
+        final targetPath = p.join(tempDir.path, 'phase5-import.ddb');
+
+        final inspection = await bridge.inspectExcelSource(
+          sourcePath: sourcePath,
+          headerRow: true,
+        );
+        final noHeaderInspection = await bridge.inspectExcelSource(
+          sourcePath: sourcePath,
+          headerRow: false,
+        );
+        expect(
+          inspection.sheets.map((sheet) => sheet.sourceName),
+          containsAll(<String>['people', 'metrics']),
+        );
+        expect(
+          noHeaderInspection.sheets.first.columns.first.sourceName,
+          'column_1',
+        );
+
+        final people = inspection.sheets.firstWhere(
+          (sheet) => sheet.sourceName == 'people',
+        );
+        expect(
+          people.columns.map((column) => column.targetType),
+          orderedEquals(<String>['INTEGER', 'TEXT', 'BOOLEAN', 'TIMESTAMP']),
+        );
+        expect(people.previewRows.first['name'], 'Ada');
+
+        final metrics = inspection.sheets.firstWhere(
+          (sheet) => sheet.sourceName == 'metrics',
+        );
+        final request = ExcelImportRequest(
+          jobId: 'excel-smoke',
+          sourcePath: sourcePath,
+          targetPath: targetPath,
+          importIntoExistingTarget: false,
+          replaceExistingTarget: true,
+          headerRow: true,
+          sheets: <ExcelImportSheetDraft>[
+            people.copyWith(targetName: 'imported_people'),
+            metrics.copyWith(
+              selected: true,
+              targetName: 'metrics_import',
+              columns: <ExcelImportColumnDraft>[
+                for (final column in metrics.columns)
+                  if (column.sourceName == 'calculated')
+                    column.copyWith(
+                      targetName: 'formula_text',
+                      targetType: 'TEXT',
+                    )
+                  else
+                    column,
+              ],
+            ),
+          ],
+        );
+
+        final updates = await bridge.importExcel(request: request).toList();
+        final terminal = updates.last;
+
+        expect(terminal.kind, ExcelImportUpdateKind.completed);
+        expect(
+          terminal.summary?.importedTables,
+          containsAll(<String>['imported_people', 'metrics_import']),
+        );
+        expect(terminal.summary?.warnings, isNotEmpty);
+
+        await bridge.openDatabase(targetPath);
+        final peopleRows = await queryAllRows(
+          'SELECT id, name, active FROM imported_people ORDER BY id',
+        );
+        final metricRows = await queryAllRows(
+          'SELECT quarter, formula_text FROM metrics_import ORDER BY quarter',
+        );
+
+        expect(peopleRows.first['name'], 'Ada');
+        expect(peopleRows.first['active'], true);
+        expect(metricRows.first['formula_text'], '=SUM(B2)');
       },
     );
   });

@@ -1,5 +1,5 @@
 name: decent_bench
-description: Phase 4 Decent Bench Flutter desktop app.
+description: Phase 5 Decent Bench Flutter desktop app.
 publish_to: none
 version: 0.1.0
 
@@ -13,6 +13,7 @@ dependencies:
     path: ../../../decentdb/bindings/dart/dart
   path: ^1.9.0
   sqlite3: ^3.1.7
+  excel: ^4.0.6
   desktop_drop: ^0.7.0
   file_selector: ^1.1.0
 

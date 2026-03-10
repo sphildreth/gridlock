@@ -1,21 +1,23 @@
 # Decent Bench App
 
-This directory contains the hand-authored Phase 4 Flutter app source for
+This directory contains the hand-authored Phase 5 Flutter app source for
 Decent Bench.
 
 ## Current state
 
 - `pubspec.yaml`, `lib/`, `test/`, and `integration_test/` are present
 - the workspace controller, multi-tab UI, desktop bridge, autocomplete,
-  snippets, formatter, drag-and-drop entry flow, and SQLite import wizard are
-  in place
+  snippets, formatter, drag-and-drop entry flow, SQLite import wizard, and
+  Excel import wizard are in place
 - reopening the same DecentDB file restores persisted query tabs for that
   workspace
 - editor settings and SQL snippets persist in `config.toml`
-- SQLite inspection, preview, and import execution run off the UI thread
+- SQLite and Excel inspection plus import execution run off the UI thread
 - desktop runner folders (`linux/`, `macos/`, `windows/`) are checked in
 - the DecentDB Dart package is consumed from a local sibling checkout at
   `../../../decentdb/bindings/dart/dart`
+- Excel import currently supports `.xlsx`; legacy `.xls` files are detected and
+  surfaced with a conversion hint to save as `.xlsx`
 
 ## Validation
 

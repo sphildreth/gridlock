@@ -15,6 +15,11 @@ Apache 2.0 distribution. This file tracks attributions and license details.
   - Copyright: package contributors
   - Source: `https://pub.dev/packages/desktop_drop`
 
+- `excel` `4.0.6`
+  - License: MIT
+  - Copyright: package contributors
+  - Source: `https://pub.dev/packages/excel`
+
 - `file_selector` `1.1.0`
   - License: BSD-style Flutter Authors license
   - Copyright: The Flutter Authors

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
+import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_state.dart';
@@ -46,9 +47,12 @@ class InMemoryWorkspaceStateStore implements WorkspaceStateStore {
 
 class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   FakeWorkspaceGateway({
+    ExcelImportInspection? excelInspection,
     SqliteImportInspection? sqliteInspection,
     Map<String, SqliteImportPreview>? sqlitePreviews,
-  }) : sqliteInspection =
+  }) : excelInspection =
+           excelInspection ?? _defaultExcelInspection('/tmp/source.xlsx'),
+       sqliteInspection =
            sqliteInspection ?? _defaultSqliteInspection('/tmp/source.sqlite'),
        sqlitePreviews = sqlitePreviews ?? _defaultSqlitePreviews();
 
@@ -57,12 +61,17 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
 
   int cancelCount = 0;
   String? lastExportPath;
+  ExcelImportInspection excelInspection;
   SqliteImportInspection sqliteInspection;
   Map<String, SqliteImportPreview> sqlitePreviews;
+  ExcelImportRequest? lastExcelImportRequest;
   SqliteImportRequest? lastSqliteImportRequest;
   String? lastCancelledImportJobId;
   bool holdImportOpen = false;
   bool failNextImport = false;
+  bool holdExcelImportOpen = false;
+  bool failNextExcelImport = false;
+  StreamController<ExcelImportUpdate>? _excelImportController;
   StreamController<SqliteImportUpdate>? _importController;
 
   SchemaSnapshot snapshot = SchemaSnapshot(
@@ -145,6 +154,19 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   @override
   Future<void> cancelImport(String jobId) async {
     lastCancelledImportJobId = jobId;
+    final excelController = _excelImportController;
+    if (excelController != null && !excelController.isClosed) {
+      excelController.add(
+        ExcelImportUpdate(
+          kind: ExcelImportUpdateKind.cancelled,
+          jobId: jobId,
+          summary: _buildCancelledExcelSummary(jobId),
+        ),
+      );
+      await excelController.close();
+      _excelImportController = null;
+      return;
+    }
     final controller = _importController;
     if (controller == null || controller.isClosed) {
       return;
@@ -162,6 +184,8 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
 
   @override
   Future<void> dispose() async {
+    await _excelImportController?.close();
+    _excelImportController = null;
     await _importController?.close();
     _importController = null;
   }
@@ -210,6 +234,78 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
 
   @override
   Future<String> initialize() async => resolvedLibraryPath!;
+
+  @override
+  Stream<ExcelImportUpdate> importExcel({
+    required ExcelImportRequest request,
+  }) async* {
+    lastExcelImportRequest = request;
+    if (holdExcelImportOpen) {
+      final controller = StreamController<ExcelImportUpdate>();
+      _excelImportController = controller;
+      Future<void>.microtask(() {
+        if (controller.isClosed) {
+          return;
+        }
+        controller.add(
+          ExcelImportUpdate(
+            kind: ExcelImportUpdateKind.progress,
+            jobId: request.jobId,
+            progress: ExcelImportProgress(
+              jobId: request.jobId,
+              currentSheet: request.selectedSheets.first.targetName,
+              completedSheets: 0,
+              totalSheets: request.selectedSheets.length,
+              currentSheetRowsCopied: 0,
+              currentSheetRowCount: request.selectedSheets.first.rowCount,
+              totalRowsCopied: 0,
+              message: 'Preparing Excel import...',
+            ),
+          ),
+        );
+      });
+      yield* controller.stream;
+      return;
+    }
+
+    yield ExcelImportUpdate(
+      kind: ExcelImportUpdateKind.progress,
+      jobId: request.jobId,
+      progress: ExcelImportProgress(
+        jobId: request.jobId,
+        currentSheet: request.selectedSheets.first.targetName,
+        completedSheets: 0,
+        totalSheets: request.selectedSheets.length,
+        currentSheetRowsCopied: request.selectedSheets.first.rowCount,
+        currentSheetRowCount: request.selectedSheets.first.rowCount,
+        totalRowsCopied: request.selectedSheets.first.rowCount,
+        message: 'Copying ${request.selectedSheets.first.targetName}...',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    if (failNextExcelImport) {
+      failNextExcelImport = false;
+      yield ExcelImportUpdate(
+        kind: ExcelImportUpdateKind.failed,
+        jobId: request.jobId,
+        message: 'Excel import failed in the fake gateway.',
+      );
+      return;
+    }
+
+    final targetFile = File(request.targetPath);
+    await targetFile.parent.create(recursive: true);
+    if (!await targetFile.exists()) {
+      await targetFile.writeAsString('');
+    }
+
+    yield ExcelImportUpdate(
+      kind: ExcelImportUpdateKind.completed,
+      jobId: request.jobId,
+      summary: _buildCompletedExcelSummary(request),
+    );
+  }
 
   @override
   Stream<SqliteImportUpdate> importSqlite({
@@ -280,6 +376,19 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
       kind: SqliteImportUpdateKind.completed,
       jobId: request.jobId,
       summary: _buildCompletedSummary(request),
+    );
+  }
+
+  @override
+  Future<ExcelImportInspection> inspectExcelSource({
+    required String sourcePath,
+    required bool headerRow,
+  }) async {
+    return ExcelImportInspection(
+      sourcePath: sourcePath,
+      headerRow: headerRow,
+      sheets: excelInspection.sheets,
+      warnings: excelInspection.warnings,
     );
   }
 
@@ -418,6 +527,125 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
       rolledBack: true,
     );
   }
+
+  ExcelImportSummary _buildCompletedExcelSummary(ExcelImportRequest request) {
+    return ExcelImportSummary(
+      jobId: request.jobId,
+      sourcePath: request.sourcePath,
+      targetPath: request.targetPath,
+      importedTables: request.selectedSheets
+          .map((sheet) => sheet.targetName)
+          .toList(),
+      rowsCopiedByTable: <String, int>{
+        for (final sheet in request.selectedSheets)
+          sheet.targetName: sheet.rowCount,
+      },
+      warnings: excelInspection.warnings,
+      statusMessage:
+          'Imported ${request.selectedSheets.fold<int>(0, (sum, sheet) => sum + sheet.rowCount)} rows from ${request.selectedSheets.length} workbook sheet${request.selectedSheets.length == 1 ? '' : 's'}.',
+      rolledBack: false,
+    );
+  }
+
+  ExcelImportSummary _buildCancelledExcelSummary(String jobId) {
+    final request = lastExcelImportRequest;
+    if (request == null) {
+      return ExcelImportSummary(
+        jobId: jobId,
+        sourcePath: excelInspection.sourcePath,
+        targetPath: '/tmp/excel-import-cancelled.ddb',
+        importedTables: const <String>[],
+        rowsCopiedByTable: const <String, int>{},
+        warnings: const <String>[],
+        statusMessage: 'Excel import cancelled and rolled back.',
+        rolledBack: true,
+      );
+    }
+    return ExcelImportSummary(
+      jobId: jobId,
+      sourcePath: request.sourcePath,
+      targetPath: request.targetPath,
+      importedTables: const <String>[],
+      rowsCopiedByTable: const <String, int>{},
+      warnings: excelInspection.warnings,
+      statusMessage: 'Excel import cancelled and rolled back.',
+      rolledBack: true,
+    );
+  }
+}
+
+ExcelImportInspection _defaultExcelInspection(String sourcePath) {
+  return ExcelImportInspection(
+    sourcePath: sourcePath,
+    headerRow: true,
+    warnings: const <String>['Workbook formulas are imported as formula text.'],
+    sheets: const <ExcelImportSheetDraft>[
+      ExcelImportSheetDraft(
+        sourceName: 'people',
+        targetName: 'people',
+        selected: true,
+        rowCount: 2,
+        columns: <ExcelImportColumnDraft>[
+          ExcelImportColumnDraft(
+            sourceIndex: 0,
+            sourceName: 'id',
+            targetName: 'id',
+            inferredTargetType: 'INTEGER',
+            targetType: 'INTEGER',
+            containsNulls: false,
+          ),
+          ExcelImportColumnDraft(
+            sourceIndex: 1,
+            sourceName: 'name',
+            targetName: 'name',
+            inferredTargetType: 'TEXT',
+            targetType: 'TEXT',
+            containsNulls: false,
+          ),
+          ExcelImportColumnDraft(
+            sourceIndex: 2,
+            sourceName: 'active',
+            targetName: 'active',
+            inferredTargetType: 'BOOLEAN',
+            targetType: 'BOOLEAN',
+            containsNulls: false,
+          ),
+        ],
+        previewRows: <Map<String, Object?>>[
+          <String, Object?>{'id': 1, 'name': 'Ada', 'active': true},
+          <String, Object?>{'id': 2, 'name': 'Grace', 'active': false},
+        ],
+      ),
+      ExcelImportSheetDraft(
+        sourceName: 'metrics',
+        targetName: 'metrics',
+        selected: true,
+        rowCount: 2,
+        columns: <ExcelImportColumnDraft>[
+          ExcelImportColumnDraft(
+            sourceIndex: 0,
+            sourceName: 'quarter',
+            targetName: 'quarter',
+            inferredTargetType: 'TEXT',
+            targetType: 'TEXT',
+            containsNulls: false,
+          ),
+          ExcelImportColumnDraft(
+            sourceIndex: 1,
+            sourceName: 'revenue',
+            targetName: 'revenue',
+            inferredTargetType: 'FLOAT64',
+            targetType: 'FLOAT64',
+            containsNulls: false,
+          ),
+        ],
+        previewRows: <Map<String, Object?>>[
+          <String, Object?>{'quarter': 'Q1', 'revenue': 1200.5},
+          <String, Object?>{'quarter': 'Q2', 'revenue': 1800.25},
+        ],
+      ),
+    ],
+  );
 }
 
 SqliteImportInspection _defaultSqliteInspection(String sourcePath) {

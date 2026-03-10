@@ -118,4 +118,59 @@ void main() {
 
     expect(gateway.lastSqliteImportRequest, isNotNull);
   });
+
+  testWidgets('opens the Excel import wizard and completes an import', (
+    tester,
+  ) async {
+    final gateway = FakeWorkspaceGateway();
+    final controller = WorkspaceController(
+      gateway: gateway,
+      configStore: InMemoryConfigStore(),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 1000);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      controller.dispose();
+    });
+
+    await controller.initialize();
+    await tester.pumpWidget(
+      DecentBenchApp(controller: controller, autoInitialize: false),
+    );
+    await tester.pumpAndSettle();
+
+    final importButton = find.widgetWithText(OutlinedButton, 'Import Excel');
+    await tester.ensureVisible(importButton);
+    await tester.tap(importButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Excel Import Wizard'), findsOneWidget);
+
+    await tester.enterText(
+      _fieldWithLabel('Excel source path'),
+      '/tmp/phase5-widget.xlsx',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Inspect Workbook'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('people'), findsWidgets);
+    expect(find.text('metrics'), findsWidgets);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Import'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+
+    expect(gateway.lastExcelImportRequest, isNotNull);
+  });
 }

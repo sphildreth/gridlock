@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../domain/app_config.dart';
+import '../domain/excel_import_models.dart';
 import '../domain/sqlite_import_models.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_state.dart';
@@ -31,6 +32,7 @@ class WorkspaceController extends ChangeNotifier {
   AppConfig config = AppConfig.defaults();
   SchemaSnapshot schema = SchemaSnapshot.empty();
   List<QueryTabState> tabs = const <QueryTabState>[];
+  ExcelImportSession? excelImportSession;
   SqliteImportSession? sqliteImportSession;
 
   String? databasePath;
@@ -46,11 +48,14 @@ class WorkspaceController extends ChangeNotifier {
   int _nextTabTitleCounter = 1;
   String? _activeTabId;
   Timer? _workspaceSaveDebounce;
+  StreamSubscription<ExcelImportUpdate>? _excelImportSubscription;
   StreamSubscription<SqliteImportUpdate>? _sqliteImportSubscription;
   bool _disposed = false;
 
   bool get hasOpenDatabase => databasePath != null;
+  bool get hasExcelImportSession => excelImportSession != null;
   bool get hasSqliteImportSession => sqliteImportSession != null;
+  bool get hasImportSession => hasExcelImportSession || hasSqliteImportSession;
 
   String get activeTabId => _activeTabId ?? tabs.first.id;
 
@@ -714,6 +719,369 @@ class WorkspaceController extends ChangeNotifier {
     await _persistConfig('Deleted snippet "${existing.first.name}".');
   }
 
+  void beginExcelImport({String sourcePath = ''}) {
+    final trimmedSource = sourcePath.trim();
+    excelImportSession = ExcelImportSession.initial(sourcePath: trimmedSource)
+        .copyWith(
+          targetPath: trimmedSource.isEmpty
+              ? ''
+              : _suggestImportTargetPath(trimmedSource),
+        );
+    _safeNotify();
+    if (trimmedSource.isNotEmpty) {
+      unawaited(loadExcelImportSource(trimmedSource));
+    }
+  }
+
+  void closeExcelImportSession() {
+    if (excelImportSession?.phase == ExcelImportJobPhase.running ||
+        excelImportSession?.phase == ExcelImportJobPhase.cancelling) {
+      return;
+    }
+    excelImportSession = null;
+    _safeNotify();
+  }
+
+  Future<void> loadExcelImportSource(String rawPath) async {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) {
+      _setExcelImportError('Choose an Excel workbook first.');
+      return;
+    }
+
+    final session =
+        excelImportSession ??
+        ExcelImportSession.initial(sourcePath: normalized);
+    excelImportSession = session.copyWith(
+      phase: ExcelImportJobPhase.inspecting,
+      sourcePath: normalized,
+      targetPath: session.targetPath.trim().isEmpty
+          ? _suggestImportTargetPath(normalized)
+          : session.targetPath,
+      sheets: const <ExcelImportSheetDraft>[],
+      warnings: const <String>[],
+      focusedSheet: null,
+      progress: null,
+      summary: null,
+      error: null,
+      jobId: null,
+    );
+    _safeNotify();
+
+    try {
+      final inspection = await _gateway.inspectExcelSource(
+        sourcePath: normalized,
+        headerRow: session.headerRow,
+      );
+      final focused = inspection.sheets.where((sheet) => sheet.selected).isEmpty
+          ? (inspection.sheets.isEmpty
+                ? null
+                : inspection.sheets.first.sourceName)
+          : inspection.sheets.firstWhere((sheet) => sheet.selected).sourceName;
+      excelImportSession = excelImportSession?.copyWith(
+        phase: ExcelImportJobPhase.ready,
+        sourcePath: inspection.sourcePath,
+        headerRow: inspection.headerRow,
+        sheets: inspection.sheets,
+        warnings: inspection.warnings,
+        focusedSheet: focused,
+        error: inspection.sheets.isEmpty
+            ? 'No worksheets were found in the selected workbook.'
+            : null,
+      );
+      _safeNotify();
+    } catch (error) {
+      _setExcelImportError(error.toString(), phase: ExcelImportJobPhase.failed);
+    }
+  }
+
+  Future<void> updateExcelImportHeaderRow(bool value) async {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(headerRow: value, error: null);
+    _safeNotify();
+    if (session.sourcePath.trim().isNotEmpty) {
+      await loadExcelImportSource(session.sourcePath);
+    }
+  }
+
+  void setExcelImportStep(ExcelImportWizardStep step) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(step: step, error: null);
+    _safeNotify();
+  }
+
+  void updateExcelImportTargetPath(String value) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(targetPath: value, error: null);
+    _safeNotify();
+  }
+
+  void updateExcelImportIntoExistingTarget(bool value) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(
+      importIntoExistingTarget: value,
+      replaceExistingTarget: value ? false : session.replaceExistingTarget,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void updateExcelImportReplaceExistingTarget(bool value) {
+    final session = excelImportSession;
+    if (session == null || session.importIntoExistingTarget) {
+      return;
+    }
+    excelImportSession = session.copyWith(
+      replaceExistingTarget: value,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void toggleExcelImportSheetSelection(String sourceName, bool selected) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+
+    final updatedSheets = <ExcelImportSheetDraft>[
+      for (final sheet in session.sheets)
+        if (sheet.sourceName == sourceName)
+          sheet.copyWith(selected: selected)
+        else
+          sheet,
+    ];
+    String? focused;
+    if (updatedSheets.any(
+      (sheet) => sheet.sourceName == session.focusedSheet && sheet.selected,
+    )) {
+      focused = session.focusedSheet;
+    } else {
+      for (final sheet in updatedSheets) {
+        if (sheet.selected) {
+          focused = sheet.sourceName;
+          break;
+        }
+      }
+    }
+    excelImportSession = session.copyWith(
+      sheets: updatedSheets,
+      focusedSheet: focused,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void focusExcelImportSheet(String sourceName) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(focusedSheet: sourceName);
+    _safeNotify();
+  }
+
+  void renameExcelImportSheet(String sourceName, String targetName) {
+    _mutateExcelImportSheet(
+      sourceName,
+      (sheet) => sheet.copyWith(targetName: targetName),
+    );
+  }
+
+  void renameExcelImportColumn(
+    String sourceSheetName,
+    int sourceColumnIndex,
+    String targetName,
+  ) {
+    _mutateExcelImportSheet(
+      sourceSheetName,
+      (sheet) => sheet.copyWith(
+        columns: <ExcelImportColumnDraft>[
+          for (final column in sheet.columns)
+            if (column.sourceIndex == sourceColumnIndex)
+              column.copyWith(targetName: targetName)
+            else
+              column,
+        ],
+      ),
+    );
+  }
+
+  void overrideExcelImportColumnType(
+    String sourceSheetName,
+    int sourceColumnIndex,
+    String targetType,
+  ) {
+    _mutateExcelImportSheet(
+      sourceSheetName,
+      (sheet) => sheet.copyWith(
+        columns: <ExcelImportColumnDraft>[
+          for (final column in sheet.columns)
+            if (column.sourceIndex == sourceColumnIndex)
+              column.copyWith(targetType: targetType)
+            else
+              column,
+        ],
+      ),
+    );
+  }
+
+  Future<void> runExcelImport() async {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    if (session.selectedSheets.isEmpty) {
+      _setExcelImportError('Select at least one worksheet to import.');
+      return;
+    }
+    if (!session.canAdvanceFromTransforms) {
+      _setExcelImportError(
+        'Resolve duplicate or empty target names before starting the import.',
+      );
+      return;
+    }
+    if (session.targetPath.trim().isEmpty) {
+      _setExcelImportError('Choose a target DecentDB file first.');
+      return;
+    }
+
+    await _excelImportSubscription?.cancel();
+    final jobId = createExcelImportJobId();
+    final request = ExcelImportRequest(
+      jobId: jobId,
+      sourcePath: session.sourcePath,
+      targetPath: session.targetPath.trim(),
+      importIntoExistingTarget: session.importIntoExistingTarget,
+      replaceExistingTarget: session.replaceExistingTarget,
+      headerRow: session.headerRow,
+      sheets: session.sheets,
+    );
+
+    excelImportSession = session.copyWith(
+      step: ExcelImportWizardStep.execute,
+      phase: ExcelImportJobPhase.running,
+      error: null,
+      summary: null,
+      jobId: jobId,
+      progress: ExcelImportProgress(
+        jobId: jobId,
+        currentSheet: request.selectedSheets.first.targetName,
+        completedSheets: 0,
+        totalSheets: request.selectedSheets.length,
+        currentSheetRowsCopied: 0,
+        currentSheetRowCount: request.selectedSheets.first.rowCount,
+        totalRowsCopied: 0,
+        message: 'Preparing Excel import...',
+      ),
+    );
+    _safeNotify();
+
+    _excelImportSubscription = _gateway.importExcel(request: request).listen((
+      update,
+    ) {
+      final current = excelImportSession;
+      if (current == null || current.jobId != update.jobId) {
+        return;
+      }
+
+      switch (update.kind) {
+        case ExcelImportUpdateKind.progress:
+          excelImportSession = current.copyWith(
+            phase: current.phase == ExcelImportJobPhase.cancelling
+                ? ExcelImportJobPhase.cancelling
+                : ExcelImportJobPhase.running,
+            progress: update.progress,
+            error: null,
+          );
+          break;
+        case ExcelImportUpdateKind.completed:
+          excelImportSession = current.copyWith(
+            step: ExcelImportWizardStep.summary,
+            phase: ExcelImportJobPhase.completed,
+            summary: update.summary,
+            error: null,
+          );
+          workspaceMessage = update.summary?.statusMessage;
+          workspaceError = null;
+          break;
+        case ExcelImportUpdateKind.cancelled:
+          excelImportSession = current.copyWith(
+            step: ExcelImportWizardStep.summary,
+            phase: ExcelImportJobPhase.cancelled,
+            summary: update.summary,
+            error: null,
+          );
+          workspaceMessage = update.summary?.statusMessage;
+          workspaceError = null;
+          break;
+        case ExcelImportUpdateKind.failed:
+          excelImportSession = current.copyWith(
+            step: ExcelImportWizardStep.summary,
+            phase: ExcelImportJobPhase.failed,
+            error: update.message ?? 'Excel import failed.',
+          );
+          break;
+      }
+      _safeNotify();
+    });
+  }
+
+  Future<void> cancelExcelImport() async {
+    final session = excelImportSession;
+    if (session == null || session.jobId == null) {
+      return;
+    }
+    excelImportSession = session.copyWith(
+      phase: ExcelImportJobPhase.cancelling,
+      error: null,
+    );
+    _safeNotify();
+    try {
+      await _gateway.cancelImport(session.jobId!);
+    } catch (error) {
+      _setExcelImportError(error.toString(), phase: ExcelImportJobPhase.failed);
+    }
+  }
+
+  Future<void> openExcelImportedDatabaseFromSummary() async {
+    final summary = excelImportSession?.summary;
+    if (summary == null) {
+      return;
+    }
+    await openDatabase(summary.targetPath, createIfMissing: false);
+    excelImportSession = null;
+    _safeNotify();
+  }
+
+  Future<void> runQueryForExcelImportedTable() async {
+    final summary = excelImportSession?.summary;
+    if (summary == null) {
+      return;
+    }
+    await openDatabase(summary.targetPath, createIfMissing: false);
+    if (summary.firstImportedTable != null) {
+      createTab(
+        sql:
+            'SELECT *\nFROM ${_quoteIdentifier(summary.firstImportedTable!)}\nLIMIT ${config.defaultPageSize};',
+      );
+    }
+    excelImportSession = null;
+    _safeNotify();
+  }
+
   void beginSqliteImport({String sourcePath = ''}) {
     final trimmedSource = sourcePath.trim();
     sqliteImportSession = SqliteImportSession.initial(sourcePath: trimmedSource)
@@ -1124,6 +1492,9 @@ class WorkspaceController extends ChangeNotifier {
   String createSnippetId() =>
       'snippet-${DateTime.now().microsecondsSinceEpoch.toString()}';
 
+  String createExcelImportJobId() =>
+      'excel-import-${DateTime.now().microsecondsSinceEpoch}';
+
   String createSqliteImportJobId() =>
       'sqlite-import-${DateTime.now().microsecondsSinceEpoch}';
 
@@ -1188,6 +1559,7 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _workspaceSaveDebounce?.cancel();
+    unawaited(_excelImportSubscription?.cancel() ?? Future<void>.value());
     unawaited(_sqliteImportSubscription?.cancel() ?? Future<void>.value());
     if (hasOpenDatabase) {
       unawaited(_persistWorkspaceStateNow());
@@ -1294,6 +1666,21 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  void _setExcelImportError(String message, {ExcelImportJobPhase? phase}) {
+    final session = excelImportSession;
+    if (session == null) {
+      workspaceError = message;
+      workspaceMessage = null;
+      _safeNotify();
+      return;
+    }
+    excelImportSession = session.copyWith(
+      error: message,
+      phase: phase ?? session.phase,
+    );
+    _safeNotify();
+  }
+
   void _setSqliteImportError(String message, {SqliteImportJobPhase? phase}) {
     final session = sqliteImportSession;
     if (session == null) {
@@ -1306,6 +1693,22 @@ class WorkspaceController extends ChangeNotifier {
       error: message,
       phase: phase ?? session.phase,
     );
+    _safeNotify();
+  }
+
+  void _mutateExcelImportSheet(
+    String sourceName,
+    ExcelImportSheetDraft Function(ExcelImportSheetDraft sheet) transform,
+  ) {
+    final session = excelImportSession;
+    if (session == null) {
+      return;
+    }
+    final updatedSheets = <ExcelImportSheetDraft>[
+      for (final sheet in session.sheets)
+        if (sheet.sourceName == sourceName) transform(sheet) else sheet,
+    ];
+    excelImportSession = session.copyWith(sheets: updatedSheets, error: null);
     _safeNotify();
   }
 

@@ -22,17 +22,6 @@ enum SqliteImportJobPhase {
 
 enum SqliteImportUpdateKind { progress, completed, failed, cancelled }
 
-const List<String> decentDbImportTargetTypes = <String>[
-  'INTEGER',
-  'BOOLEAN',
-  'FLOAT64',
-  'TEXT',
-  'BLOB',
-  'UUID',
-  'DECIMAL(18,6)',
-  'TIMESTAMP',
-];
-
 class SqliteImportForeignKey {
   const SqliteImportForeignKey({
     required this.fromColumn,
