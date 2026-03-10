@@ -1,5 +1,7 @@
 import 'package:path/path.dart' as p;
 
+const String canonicalDecentDbExtension = '.ddb';
+
 enum WorkspaceIncomingFileKind { decentDb, sqlite, excel, sqlDump, unknown }
 
 class WorkspaceIncomingFileDecision {
@@ -42,7 +44,7 @@ WorkspaceIncomingFileDecision decideWorkspaceIncomingFiles(
 WorkspaceIncomingFileKind detectWorkspaceIncomingFileKind(String rawPath) {
   final extension = p.extension(rawPath.trim()).toLowerCase();
   return switch (extension) {
-    '.ddb' => WorkspaceIncomingFileKind.decentDb,
+    canonicalDecentDbExtension => WorkspaceIncomingFileKind.decentDb,
     '.db' || '.sqlite' || '.sqlite3' => WorkspaceIncomingFileKind.sqlite,
     '.xls' || '.xlsx' => WorkspaceIncomingFileKind.excel,
     '.sql' => WorkspaceIncomingFileKind.sqlDump,

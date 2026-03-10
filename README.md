@@ -10,12 +10,13 @@ workflows.
 
 ## Project status
 
-**Pre-alpha / active implementation.** Phase 6 is implemented and runnable
+**Pre-alpha / active implementation.** Phase 7 is implemented and runnable
 under `apps/decent-bench/`.
 
 Current engine capability baseline: **DecentDB v1.6.x**.
+Canonical DecentDB desktop file extension: **`.ddb`**.
 
-### Implemented now (Phase 6)
+### Implemented now (Phase 7)
 
 - open an existing DecentDB file or create a new one
 - drag and drop a `.ddb` file to open it immediately
@@ -63,6 +64,10 @@ Current engine capability baseline: **DecentDB v1.6.x**.
 - open the imported database or launch a starter query from the import summary
 - inspect schema metadata loaded through the DecentDB adapter for tables, views,
   columns, indexes, and exposed constraint details
+- harden native-library startup with deterministic runtime resolution order and
+  actionable missing-library diagnostics
+- stage the DecentDB native library into desktop bundles through a repeatable
+  packaging helper for Linux, macOS, and Windows outputs
 - run SQL in multiple editor tabs with per-tab positional parameters
 - keep per-tab results, errors, and CSV export state isolated
 - restore query tabs when reopening the same DecentDB file
@@ -78,7 +83,8 @@ Current engine capability baseline: **DecentDB v1.6.x**.
 - persist recent files, export defaults, editor settings, and SQL snippets in
   TOML
 - persist workspace tab drafts separately from global config
-- run unit, smoke, widget, and integration tests for the Phase 6 workflow
+- run broader unit, smoke, widget, and integration tests for the MVP workflow,
+  including native-library resolution and larger paging/schema scenarios
 
 ### Not implemented yet
 
@@ -193,6 +199,26 @@ The app resolves the native DecentDB library in this order:
 If the sibling build is present and resolves correctly, you can omit
 `DECENTDB_NATIVE_LIB` when launching locally.
 
+### Package desktop builds
+
+Build the Flutter desktop bundle first, then stage the DecentDB native library
+into the generated output:
+
+```bash
+cd apps/decent-bench
+flutter build linux
+dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle
+dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle --verify-only
+```
+
+Equivalent bundle roots:
+
+- macOS: `build/macos/Build/Products/Release/decent_bench.app`
+- Windows: `build/windows/x64/runner/Release`
+
+The staging helper uses the same resolution contract as the app. See
+[design/adr/0009-desktop-native-library-packaging-and-resolution.md](/home/steven/source/decent-bench/design/adr/0009-desktop-native-library-packaging-and-resolution.md).
+
 ### Local config and workspace state
 
 Global config is stored as TOML at:
@@ -214,6 +240,30 @@ Per-database workspace state is stored separately under:
 That workspace-state store restores query tabs only when the same database is
 opened again. See
 [design/adr/0004-workspace-state-persistence.md](/home/steven/source/decent-bench/design/adr/0004-workspace-state-persistence.md).
+
+## Manual Verification
+
+Use this checklist before cutting or reviewing an MVP build:
+
+- Large query paging:
+  run a query that returns thousands of rows, load more pages, and confirm the
+  window stays responsive while row counts and running/completed state stay
+  accurate
+- Cancellation:
+  run a longer query, cancel it, and confirm the tab reports cancelled or
+  partial results without blocking the next execution
+- Long-running imports:
+  run SQLite, Excel, and SQL dump imports with enough data to show progress,
+  cancel at least one run, and confirm the summary reports rollback-oriented
+  status clearly
+- Export behavior:
+  export CSV with headers on and off plus a custom delimiter, then confirm the
+  file contents match the visible result shape
+- Packaged startup:
+  build a desktop bundle, run
+  `dart run tool/stage_decentdb_native.dart --bundle <bundle-path> --verify-only`,
+  then launch the packaged app without `DECENTDB_NATIVE_LIB` and confirm it
+  resolves the bundled library path
 
 ### Contributing
 
@@ -238,6 +288,8 @@ Recent ADRs relevant to the current implementation:
 - [design/adr/0004-workspace-state-persistence.md](/home/steven/source/decent-bench/design/adr/0004-workspace-state-persistence.md)
 - [design/adr/0005-editor-config-and-snippet-persistence.md](/home/steven/source/decent-bench/design/adr/0005-editor-config-and-snippet-persistence.md)
 - [design/adr/0006-sqlite-import-entry-and-worker-architecture.md](/home/steven/source/decent-bench/design/adr/0006-sqlite-import-entry-and-worker-architecture.md)
+- [design/adr/0008-sql-dump-import-mvp-parser-and-warning-contract.md](/home/steven/source/decent-bench/design/adr/0008-sql-dump-import-mvp-parser-and-warning-contract.md)
+- [design/adr/0009-desktop-native-library-packaging-and-resolution.md](/home/steven/source/decent-bench/design/adr/0009-desktop-native-library-packaging-and-resolution.md)
 - [design/adr/0007-excel-import-parser-and-legacy-workbook-handling.md](/home/steven/source/decent-bench/design/adr/0007-excel-import-parser-and-legacy-workbook-handling.md)
 
 ## License

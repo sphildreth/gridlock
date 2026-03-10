@@ -1,4 +1,4 @@
-name: Flutter Phase 1
+name: Flutter MVP
 
 on:
   push:
@@ -59,3 +59,76 @@ jobs:
         env:
           DECENTDB_NATIVE_LIB: ${{ github.workspace }}/../decentdb/build/libc_api.so
         run: flutter test integration_test
+
+  desktop-package-verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            flutter_target: linux
+            bundle_path: build/linux/x64/release/bundle
+            native_lib: ../../../decentdb/build/libc_api.so
+          - os: macos-latest
+            flutter_target: macos
+            bundle_path: build/macos/Build/Products/Release/decent_bench.app
+            native_lib: ../../../decentdb/build/libc_api.dylib
+          - os: windows-latest
+            flutter_target: windows
+            bundle_path: build/windows/x64/runner/Release
+            native_lib: ../../../decentdb/build/c_api.dll
+
+    steps:
+      - name: Check out Decent Bench
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2.21.0
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Nim on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes nim
+
+      - name: Install Nim on macOS
+        if: runner.os == 'macOS'
+        run: brew install nim
+
+      - name: Install Nim on Windows
+        if: runner.os == 'Windows'
+        run: choco install nim --yes --no-progress
+
+      - name: Resolve latest DecentDB v1.6.x tag
+        id: decentdb-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs https://github.com/sphildreth/decentdb.git 'v1.6.*' | awk -F/ '{print $3}' | sort -V | tail -n 1)"
+          test -n "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out DecentDB ${{ steps.decentdb-tag.outputs.tag }}
+        run: git clone --depth 1 --branch "${{ steps.decentdb-tag.outputs.tag }}" https://github.com/sphildreth/decentdb.git ../decentdb
+
+      - name: Build DecentDB native library
+        working-directory: ../decentdb
+        run: nimble build_lib
+
+      - name: Flutter pub get
+        working-directory: apps/decent-bench
+        run: flutter pub get
+
+      - name: Flutter build ${{ matrix.flutter_target }}
+        working-directory: apps/decent-bench
+        run: flutter build ${{ matrix.flutter_target }}
+
+      - name: Stage DecentDB native library into bundle
+        working-directory: apps/decent-bench
+        run: dart run tool/stage_decentdb_native.dart --bundle "${{ matrix.bundle_path }}" --source "${{ matrix.native_lib }}"
+
+      - name: Verify bundled native library
+        working-directory: apps/decent-bench
+        run: dart run tool/stage_decentdb_native.dart --bundle "${{ matrix.bundle_path }}" --verify-only

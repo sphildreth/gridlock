@@ -1842,7 +1842,7 @@ class _Header extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Phase 4 workspace: open or create DecentDB files, drag in a SQLite source for guided import, restore query tabs, author SQL with autocomplete and snippets, and iterate through paged results.',
+                    'MVP workbench: open or create DecentDB files, drag in SQLite, Excel, or SQL dump sources for guided import, restore query tabs, author SQL with autocomplete and snippets, and iterate through paged results.',
                     style: theme.textTheme.bodyMedium,
                   ),
                 ],

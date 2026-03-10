@@ -316,6 +316,41 @@ INSERT INTO `metrics` VALUES ('Q1', 1200.50), ('Q2', 1800.25);
       );
     });
 
+    test(
+      'handles broader schema snapshots and larger paged result sets',
+      skip: skipReason,
+      () async {
+        for (var i = 0; i < 24; i++) {
+          await exec(
+            'CREATE TABLE bulk_table_$i (id INTEGER PRIMARY KEY, label TEXT)',
+          );
+        }
+        await exec(
+          'CREATE TABLE large_rows (id INTEGER PRIMARY KEY, label TEXT NOT NULL)',
+        );
+        for (var i = 1; i <= 1500; i++) {
+          await exec(
+            'INSERT INTO large_rows VALUES (\$1, \$2)',
+            params: <Object?>[i, 'row-$i'],
+          );
+        }
+
+        final schema = await bridge.loadSchema();
+        final rows = await queryAllRows(
+          'SELECT id, label FROM large_rows ORDER BY id',
+          pageSize: 128,
+        );
+
+        expect(
+          schema.tables.where((table) => table.name.startsWith('bulk_table_')),
+          hasLength(24),
+        );
+        expect(rows, hasLength(1500));
+        expect(rows.first['id'], 1);
+        expect(rows.last['id'], 1500);
+      },
+    );
+
     test('supports views and indexes', skip: skipReason, () async {
       await exec(
         'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)',

@@ -1,6 +1,6 @@
 # Decent Bench App
 
-This directory contains the hand-authored Phase 6 Flutter app source for
+This directory contains the hand-authored Phase 7 Flutter app source for
 Decent Bench.
 
 ## Current state
@@ -23,6 +23,9 @@ Decent Bench.
   `design/SPEC.md`: common MariaDB/MySQL-style `CREATE TABLE` plus
   `INSERT ... VALUES`, with unsupported statements surfaced as warnings rather
   than hard failures when possible
+- native-library resolution now prefers `DECENTDB_NATIVE_LIB`, then bundled
+  desktop app locations, then a sibling `../decentdb/build/` checkout, with a
+  packaging helper to stage the library into built bundles
 
 ## Validation
 
@@ -34,6 +37,9 @@ flutter analyze
 DECENTDB_NATIVE_LIB=/path/to/decentdb/build/libc_api.so flutter test
 DECENTDB_NATIVE_LIB=/path/to/decentdb/build/libc_api.so flutter test integration_test
 DECENTDB_NATIVE_LIB=/path/to/decentdb/build/libc_api.so flutter run -d linux
+flutter build linux
+dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle
+dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle --verify-only
 ```
 
 The app expects a compatible DecentDB v1.6.x native library to be available via:
@@ -45,3 +51,9 @@ The app expects a compatible DecentDB v1.6.x native library to be available via:
 Workspace tab drafts are stored separately from `config.toml` under the
 platform-specific `workspaces/` directory documented in the root
 [README.md](/home/steven/source/decent-bench/README.md).
+
+For packaged builds on other platforms, use the same staging helper with the
+platform bundle root:
+
+- macOS: `build/macos/Build/Products/Release/decent_bench.app`
+- Windows: `build/windows/x64/runner/Release`

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('detects DecentDB and SQLite files by extension', () {
+    expect(canonicalDecentDbExtension, '.ddb');
     expect(
       detectWorkspaceIncomingFileKind('/tmp/workbench.ddb'),
       WorkspaceIncomingFileKind.decentDb,

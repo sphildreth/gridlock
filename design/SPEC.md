@@ -201,7 +201,7 @@ concerns is required.
 
 **Detection rules (MVP):**
 - Extension-based detection:
-  - DecentDB: canonical DecentDB extension as defined by the pinned engine
+  - DecentDB: `.ddb`
   - Excel: `.xls`, `.xlsx`
   - SQLite: `.db`, `.sqlite`, `.sqlite3`
   - SQL dump: `.sql`
@@ -729,6 +729,9 @@ Any fallback strategy requires an ADR before implementation.
 Config format must include a schema version or migration mechanism before the
 format is considered stable.
 
+The current TOML config format includes `config_version`, and workspace-state
+storage includes an independent schema version for file-specific UI state.
+
 ---
 
 ## 13. Testing and quality
@@ -804,6 +807,13 @@ CI should run these as soon as the project becomes runnable.
 
 - Bundle required DecentDB native libraries with desktop builds
 - Ensure deterministic library discovery at app startup
+- Runtime discovery order is:
+  1. `DECENTDB_NATIVE_LIB`
+  2. the platform-specific bundled desktop app location
+  3. a sibling `../decentdb/build/` checkout for development
+- The desktop packaging flow may stage the DecentDB native library into the
+  generated bundle through a repeatable helper script, but packaged startup
+  must not depend on `DECENTDB_NATIVE_LIB`
 - Keep packaging aligned with the upstream binding strategy from ADR-0001
 - Signing/notarization and final installer formats may be staged after MVP, but
   packaging must not require manual developer-only steps for normal app startup

@@ -422,14 +422,19 @@ Heavy work must not run on the UI thread. This includes:
 - Cross-platform packaging of native libraries may introduce build complexity
 
 ### 12.2 Open questions to resolve before or during implementation
-1. What is the canonical DecentDB file extension for desktop UX?
-2. What is the exact landing order for schema-browser metadata beyond the Phase
-   1 tables/columns slice, while preserving the full pinned-engine contract?
-3. Do basic computed columns remain in MVP, or should they move to post-MVP to
-   keep the import workflow smaller and more reliable?
-4. What is the exact configuration file location and schema per OS?
-5. What is the exact query-tab execution state model for idle, running,
-   cancelling, failed, completed, and cancelled states?
+
+The original implementation questions for MVP have been closed in the current
+spec and ADR set:
+
+1. The canonical DecentDB desktop file extension is `.ddb`.
+2. Schema-browser delivery preserves the full pinned-engine contract while
+   exposing tables, views, columns, indexes, and the constraint details the
+   current adapter can surface, with explicit notes when trigger/generated/temp
+   metadata is not exposed by the current Dart schema API.
+3. Computed-column transforms remain deferred beyond MVP.
+4. Config and workspace-state locations are defined per OS and versioned.
+5. Query-tab execution state uses the documented idle/running/fetching/
+   cancelling/completed/cancelled/failed model.
 
 ---
 
