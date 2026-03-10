@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
+import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_state.dart';
@@ -48,10 +49,13 @@ class InMemoryWorkspaceStateStore implements WorkspaceStateStore {
 class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   FakeWorkspaceGateway({
     ExcelImportInspection? excelInspection,
+    SqlDumpImportInspection? sqlDumpInspection,
     SqliteImportInspection? sqliteInspection,
     Map<String, SqliteImportPreview>? sqlitePreviews,
   }) : excelInspection =
            excelInspection ?? _defaultExcelInspection('/tmp/source.xlsx'),
+       sqlDumpInspection =
+           sqlDumpInspection ?? _defaultSqlDumpInspection('/tmp/source.sql'),
        sqliteInspection =
            sqliteInspection ?? _defaultSqliteInspection('/tmp/source.sqlite'),
        sqlitePreviews = sqlitePreviews ?? _defaultSqlitePreviews();
@@ -62,16 +66,21 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   int cancelCount = 0;
   String? lastExportPath;
   ExcelImportInspection excelInspection;
+  SqlDumpImportInspection sqlDumpInspection;
   SqliteImportInspection sqliteInspection;
   Map<String, SqliteImportPreview> sqlitePreviews;
   ExcelImportRequest? lastExcelImportRequest;
+  SqlDumpImportRequest? lastSqlDumpImportRequest;
   SqliteImportRequest? lastSqliteImportRequest;
   String? lastCancelledImportJobId;
   bool holdImportOpen = false;
   bool failNextImport = false;
   bool holdExcelImportOpen = false;
   bool failNextExcelImport = false;
+  bool holdSqlDumpImportOpen = false;
+  bool failNextSqlDumpImport = false;
   StreamController<ExcelImportUpdate>? _excelImportController;
+  StreamController<SqlDumpImportUpdate>? _sqlDumpImportController;
   StreamController<SqliteImportUpdate>? _importController;
 
   SchemaSnapshot snapshot = SchemaSnapshot(
@@ -154,6 +163,19 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   @override
   Future<void> cancelImport(String jobId) async {
     lastCancelledImportJobId = jobId;
+    final sqlDumpController = _sqlDumpImportController;
+    if (sqlDumpController != null && !sqlDumpController.isClosed) {
+      sqlDumpController.add(
+        SqlDumpImportUpdate(
+          kind: SqlDumpImportUpdateKind.cancelled,
+          jobId: jobId,
+          summary: _buildCancelledSqlDumpSummary(jobId),
+        ),
+      );
+      await sqlDumpController.close();
+      _sqlDumpImportController = null;
+      return;
+    }
     final excelController = _excelImportController;
     if (excelController != null && !excelController.isClosed) {
       excelController.add(
@@ -186,6 +208,8 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   Future<void> dispose() async {
     await _excelImportController?.close();
     _excelImportController = null;
+    await _sqlDumpImportController?.close();
+    _sqlDumpImportController = null;
     await _importController?.close();
     _importController = null;
   }
@@ -308,6 +332,78 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
   }
 
   @override
+  Stream<SqlDumpImportUpdate> importSqlDump({
+    required SqlDumpImportRequest request,
+  }) async* {
+    lastSqlDumpImportRequest = request;
+    if (holdSqlDumpImportOpen) {
+      final controller = StreamController<SqlDumpImportUpdate>();
+      _sqlDumpImportController = controller;
+      Future<void>.microtask(() {
+        if (controller.isClosed) {
+          return;
+        }
+        controller.add(
+          SqlDumpImportUpdate(
+            kind: SqlDumpImportUpdateKind.progress,
+            jobId: request.jobId,
+            progress: SqlDumpImportProgress(
+              jobId: request.jobId,
+              currentTable: request.selectedTables.first.targetName,
+              completedTables: 0,
+              totalTables: request.selectedTables.length,
+              currentTableRowsCopied: 0,
+              currentTableRowCount: request.selectedTables.first.rowCount,
+              totalRowsCopied: 0,
+              message: 'Preparing SQL dump import...',
+            ),
+          ),
+        );
+      });
+      yield* controller.stream;
+      return;
+    }
+
+    yield SqlDumpImportUpdate(
+      kind: SqlDumpImportUpdateKind.progress,
+      jobId: request.jobId,
+      progress: SqlDumpImportProgress(
+        jobId: request.jobId,
+        currentTable: request.selectedTables.first.targetName,
+        completedTables: 0,
+        totalTables: request.selectedTables.length,
+        currentTableRowsCopied: request.selectedTables.first.rowCount,
+        currentTableRowCount: request.selectedTables.first.rowCount,
+        totalRowsCopied: request.selectedTables.first.rowCount,
+        message: 'Copying ${request.selectedTables.first.targetName}...',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    if (failNextSqlDumpImport) {
+      failNextSqlDumpImport = false;
+      yield SqlDumpImportUpdate(
+        kind: SqlDumpImportUpdateKind.failed,
+        jobId: request.jobId,
+        message: 'SQL dump import failed in the fake gateway.',
+      );
+      return;
+    }
+
+    final targetFile = File(request.targetPath);
+    await targetFile.parent.create(recursive: true);
+    if (!await targetFile.exists()) {
+      await targetFile.writeAsString('');
+    }
+
+    yield SqlDumpImportUpdate(
+      kind: SqlDumpImportUpdateKind.completed,
+      jobId: request.jobId,
+      summary: _buildCompletedSqlDumpSummary(request),
+    );
+  }
+
+  @override
   Stream<SqliteImportUpdate> importSqlite({
     required SqliteImportRequest request,
   }) async* {
@@ -400,6 +496,24 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
       sourcePath: sourcePath,
       tables: sqliteInspection.tables,
       warnings: sqliteInspection.warnings,
+    );
+  }
+
+  @override
+  Future<SqlDumpImportInspection> inspectSqlDumpSource({
+    required String sourcePath,
+    required String encoding,
+  }) async {
+    return SqlDumpImportInspection(
+      sourcePath: sourcePath,
+      requestedEncoding: encoding,
+      resolvedEncoding: encoding == 'auto'
+          ? sqlDumpInspection.resolvedEncoding
+          : encoding,
+      tables: sqlDumpInspection.tables,
+      warnings: sqlDumpInspection.warnings,
+      skippedStatements: sqlDumpInspection.skippedStatements,
+      totalStatements: sqlDumpInspection.totalStatements,
     );
   }
 
@@ -572,6 +686,59 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
       rolledBack: true,
     );
   }
+
+  SqlDumpImportSummary _buildCompletedSqlDumpSummary(
+    SqlDumpImportRequest request,
+  ) {
+    return SqlDumpImportSummary(
+      jobId: request.jobId,
+      sourcePath: request.sourcePath,
+      targetPath: request.targetPath,
+      importedTables: request.selectedTables
+          .map((table) => table.targetName)
+          .toList(),
+      rowsCopiedByTable: <String, int>{
+        for (final table in request.selectedTables)
+          table.targetName: table.rowCount,
+      },
+      skippedStatementCount: sqlDumpInspection.skippedStatementCount,
+      warnings: sqlDumpInspection.warnings,
+      skippedStatements: sqlDumpInspection.skippedStatements,
+      statusMessage:
+          'Imported ${request.selectedTables.fold<int>(0, (sum, table) => sum + table.rowCount)} rows from ${request.selectedTables.length} parsed table${request.selectedTables.length == 1 ? '' : 's'}.',
+      rolledBack: false,
+    );
+  }
+
+  SqlDumpImportSummary _buildCancelledSqlDumpSummary(String jobId) {
+    final request = lastSqlDumpImportRequest;
+    if (request == null) {
+      return SqlDumpImportSummary(
+        jobId: jobId,
+        sourcePath: sqlDumpInspection.sourcePath,
+        targetPath: '/tmp/sql-dump-import-cancelled.ddb',
+        importedTables: const <String>[],
+        rowsCopiedByTable: const <String, int>{},
+        skippedStatementCount: sqlDumpInspection.skippedStatementCount,
+        warnings: sqlDumpInspection.warnings,
+        skippedStatements: sqlDumpInspection.skippedStatements,
+        statusMessage: 'SQL dump import cancelled and rolled back.',
+        rolledBack: true,
+      );
+    }
+    return SqlDumpImportSummary(
+      jobId: jobId,
+      sourcePath: request.sourcePath,
+      targetPath: request.targetPath,
+      importedTables: const <String>[],
+      rowsCopiedByTable: const <String, int>{},
+      skippedStatementCount: sqlDumpInspection.skippedStatementCount,
+      warnings: sqlDumpInspection.warnings,
+      skippedStatements: sqlDumpInspection.skippedStatements,
+      statusMessage: 'SQL dump import cancelled and rolled back.',
+      rolledBack: true,
+    );
+  }
 }
 
 ExcelImportInspection _defaultExcelInspection(String sourcePath) {
@@ -642,6 +809,113 @@ ExcelImportInspection _defaultExcelInspection(String sourcePath) {
         previewRows: <Map<String, Object?>>[
           <String, Object?>{'quarter': 'Q1', 'revenue': 1200.5},
           <String, Object?>{'quarter': 'Q2', 'revenue': 1800.25},
+        ],
+      ),
+    ],
+  );
+}
+
+SqlDumpImportInspection _defaultSqlDumpInspection(String sourcePath) {
+  return SqlDumpImportInspection(
+    sourcePath: sourcePath,
+    requestedEncoding: 'auto',
+    resolvedEncoding: 'utf8',
+    warnings: <String>[
+      'Skipped 2 unsupported session-management statements during SQL dump inspection.',
+    ],
+    skippedStatements: <SqlDumpImportSkippedStatement>[
+      SqlDumpImportSkippedStatement(
+        ordinal: 1,
+        kind: 'SET',
+        reason: 'Skipping unsupported SET statement #1.',
+        snippet: 'SET NAMES utf8mb4',
+      ),
+      SqlDumpImportSkippedStatement(
+        ordinal: 5,
+        kind: 'LOCK TABLES',
+        reason: 'Skipping unsupported LOCK TABLES statement #5.',
+        snippet: 'LOCK TABLES `people` WRITE',
+      ),
+    ],
+    totalStatements: 6,
+    tables: <SqlDumpImportTableDraft>[
+      SqlDumpImportTableDraft(
+        sourceName: 'people',
+        targetName: 'people',
+        selected: true,
+        rowCount: 2,
+        columns: <SqlDumpImportColumnDraft>[
+          SqlDumpImportColumnDraft(
+            sourceIndex: 0,
+            sourceName: 'id',
+            targetName: 'id',
+            declaredType: 'INT',
+            inferredTargetType: 'INTEGER',
+            targetType: 'INTEGER',
+            notNull: true,
+            primaryKey: true,
+            unique: true,
+          ),
+          SqlDumpImportColumnDraft(
+            sourceIndex: 1,
+            sourceName: 'name',
+            targetName: 'name',
+            declaredType: 'VARCHAR(255)',
+            inferredTargetType: 'TEXT',
+            targetType: 'TEXT',
+            notNull: true,
+            primaryKey: false,
+            unique: false,
+          ),
+          SqlDumpImportColumnDraft(
+            sourceIndex: 2,
+            sourceName: 'active',
+            targetName: 'active',
+            declaredType: 'TINYINT(1)',
+            inferredTargetType: 'BOOLEAN',
+            targetType: 'BOOLEAN',
+            notNull: false,
+            primaryKey: false,
+            unique: false,
+          ),
+        ],
+        previewRows: <Map<String, Object?>>[
+          <String, Object?>{'id': 1, 'name': 'Ada', 'active': true},
+          <String, Object?>{'id': 2, 'name': 'Grace', 'active': false},
+        ],
+      ),
+      SqlDumpImportTableDraft(
+        sourceName: 'metrics',
+        targetName: 'metrics',
+        selected: true,
+        rowCount: 2,
+        columns: <SqlDumpImportColumnDraft>[
+          SqlDumpImportColumnDraft(
+            sourceIndex: 0,
+            sourceName: 'quarter',
+            targetName: 'quarter',
+            declaredType: 'VARCHAR(16)',
+            inferredTargetType: 'TEXT',
+            targetType: 'TEXT',
+            notNull: true,
+            primaryKey: true,
+            unique: true,
+          ),
+          SqlDumpImportColumnDraft(
+            sourceIndex: 1,
+            sourceName: 'revenue',
+            targetName: 'revenue',
+            declaredType: 'DECIMAL(10,2)',
+            inferredTargetType: 'DECIMAL(10,2)',
+            targetType: 'DECIMAL(10,2)',
+            notNull: false,
+            primaryKey: false,
+            unique: false,
+          ),
+        ],
+        previewRows: <Map<String, Object?>>[
+          <String, Object?>{'quarter': 'Q1', 'revenue': '1200.50'},
+          <String, Object?>{'quarter': 'Q2', 'revenue': '1800.25'},
         ],
       ),
     ],

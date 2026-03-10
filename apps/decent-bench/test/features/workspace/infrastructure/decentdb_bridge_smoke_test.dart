@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
+import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/infrastructure/decentdb_bridge.dart';
@@ -205,6 +207,32 @@ CREATE TABLE blob_samples (
 
       final bytes = workbook.save();
       File(sourcePath).writeAsBytesSync(bytes!);
+      return sourcePath;
+    }
+
+    String createSqlDumpSource(String filename) {
+      final sourcePath = p.join(tempDir.path, filename);
+      final dump = '''
+SET NAMES latin1;
+CREATE TABLE `people` (
+  `id` INT NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `active` TINYINT(1) DEFAULT 1,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+INSERT INTO `people` (`id`, `name`, `active`) VALUES
+  (1, 'José', 1),
+  (2, 'Ana', 0);
+LOCK TABLES `people` WRITE;
+UNLOCK TABLES;
+CREATE TABLE `metrics` (
+  `quarter` VARCHAR(16) NOT NULL,
+  `revenue` DECIMAL(10,2),
+  PRIMARY KEY (`quarter`)
+);
+INSERT INTO `metrics` VALUES ('Q1', 1200.50), ('Q2', 1800.25);
+''';
+      File(sourcePath).writeAsBytesSync(latin1.encode(dump));
       return sourcePath;
     }
 
@@ -756,6 +784,98 @@ ORDER BY n.id
         expect(peopleRows.first['name'], 'Ada');
         expect(peopleRows.first['active'], true);
         expect(metricRows.first['formula_text'], '=SUM(B2)');
+      },
+    );
+
+    test(
+      'inspects SQL dumps and imports selected parsed tables',
+      skip: skipReason,
+      () async {
+        final sourcePath = createSqlDumpSource('phase6-source.sql');
+        final targetPath = p.join(tempDir.path, 'phase6-import.ddb');
+
+        final inspection = await bridge.inspectSqlDumpSource(
+          sourcePath: sourcePath,
+          encoding: 'auto',
+        );
+        expect(inspection.resolvedEncoding, 'latin1');
+        expect(
+          inspection.tables.map((table) => table.sourceName),
+          orderedEquals(<String>['people', 'metrics']),
+        );
+        expect(inspection.skippedStatementCount, 3);
+        expect(
+          inspection.tables
+              .firstWhere((table) => table.sourceName == 'people')
+              .columns
+              .firstWhere((column) => column.sourceName == 'active')
+              .targetType,
+          'BOOLEAN',
+        );
+        expect(
+          inspection.tables
+              .firstWhere((table) => table.sourceName == 'metrics')
+              .columns
+              .firstWhere((column) => column.sourceName == 'revenue')
+              .targetType,
+          'DECIMAL(10,2)',
+        );
+        expect(
+          inspection.tables
+              .firstWhere((table) => table.sourceName == 'people')
+              .previewRows
+              .first['name'],
+          'José',
+        );
+
+        final request = SqlDumpImportRequest(
+          jobId: 'sql-dump-smoke',
+          sourcePath: sourcePath,
+          targetPath: targetPath,
+          importIntoExistingTarget: false,
+          replaceExistingTarget: true,
+          encoding: 'auto',
+          tables: inspection.tables.map((table) {
+            if (table.sourceName == 'people') {
+              return table.copyWith(
+                targetName: 'imported_people',
+                columns: <SqlDumpImportColumnDraft>[
+                  for (final column in table.columns)
+                    if (column.sourceName == 'name')
+                      column.copyWith(targetName: 'display_name')
+                    else
+                      column,
+                ],
+              );
+            }
+            return table.copyWith(targetName: 'imported_metrics');
+          }).toList(),
+        );
+
+        final updates = await bridge.importSqlDump(request: request).toList();
+        final terminal = updates.last;
+
+        expect(terminal.kind, SqlDumpImportUpdateKind.completed);
+        expect(
+          terminal.summary?.importedTables,
+          orderedEquals(<String>['imported_people', 'imported_metrics']),
+        );
+        expect(terminal.summary?.skippedStatementCount, 3);
+
+        await bridge.openDatabase(targetPath);
+        final peopleRows = await queryAllRows(
+          'SELECT id, display_name, active FROM imported_people ORDER BY id',
+        );
+        final metricRows = await queryAllRows(
+          'SELECT quarter, revenue FROM imported_metrics ORDER BY quarter',
+        );
+
+        expect(peopleRows, hasLength(2));
+        expect(peopleRows.first['display_name'], 'José');
+        expect(peopleRows.first['active'], true);
+        expect(peopleRows.last['active'], false);
+        expect(metricRows, hasLength(2));
+        expect(metricRows.first['quarter'], 'Q1');
       },
     );
   });

@@ -5,46 +5,61 @@
 Decent Bench is a cross-platform desktop app (Flutter) for power users who need
 to work directly with **DecentDB**: open or create a database, inspect schema,
 run the full pinned DecentDB SQL surface, export shaped results, and import
-SQLite and Excel sources through guided workflows.
+SQLite, Excel, and MariaDB/MySQL-style SQL dump sources through guided
+workflows.
 
 ## Project status
 
-**Pre-alpha / active implementation.** Phase 5 is implemented and runnable
+**Pre-alpha / active implementation.** Phase 6 is implemented and runnable
 under `apps/decent-bench/`.
 
 Current engine capability baseline: **DecentDB v1.6.x**.
 
-### Implemented now (Phase 5)
+### Implemented now (Phase 6)
 
 - open an existing DecentDB file or create a new one
 - drag and drop a `.ddb` file to open it immediately
 - drag and drop a `.db`, `.sqlite`, or `.sqlite3` file to launch the SQLite
   import wizard
 - drag and drop an `.xlsx` file to launch the Excel import wizard
+- drag and drop a `.sql` file to launch the SQL dump import wizard
 - inspect SQLite sources in the background before import
 - inspect Excel workbooks in the background before import
+- inspect MariaDB/MySQL-style `.sql` dumps in the background with
+  auto-detect, UTF-8, and Latin-1 decode options
 - run a six-step SQLite import wizard for source, target, preview, transforms,
   execution, and summary
 - run a six-step Excel import wizard for source, target, preview, transforms,
   execution, and summary
+- run a six-step SQL dump import wizard for source, target, preview,
+  transforms, execution, and summary
 - select SQLite tables to import, rename target tables and columns, and apply
   per-column type overrides limited to DecentDB native types
 - select Excel worksheets to import, toggle header-row handling, rename target
   tables and columns, and apply per-column type overrides limited to DecentDB
   native types
+- select parsed SQL dump tables to import, rename target tables and columns,
+  and apply per-column type overrides limited to DecentDB native types
 - map representative SQLite affinities to DecentDB types, including boolean,
   decimal, blob, and timestamp-oriented cases
 - infer representative Excel column types for integers, booleans, floats,
   timestamps, and safe text fallbacks
+- parse representative SQL dump `CREATE TABLE` plus `INSERT ... VALUES`
+  statements, infer DecentDB target types for common MySQL/MariaDB column
+  types, and preserve unsupported statements as warnings
 - preview sample SQLite rows before import and surface warnings for `STRICT`,
   `WITHOUT ROWID`, skipped composite indexes, and skipped foreign keys to
   unselected tables
 - preview sample Excel rows before import and surface warnings for formula-text
   handling and unsupported legacy `.xls` workbooks
+- preview sample SQL dump rows before import and surface warnings for skipped
+  `SET`, `LOCK TABLES`, `ALTER TABLE`, and other unsupported statements
 - execute SQLite imports in a background worker with progress updates and
   best-effort cancellation plus rollback-oriented summary messaging
 - execute Excel imports in a background worker with progress updates and
   best-effort cancellation plus rollback-oriented summary messaging
+- execute SQL dump imports in a background worker with progress updates and
+  rollback-oriented summary messaging
 - open the imported database or launch a starter query from the import summary
 - inspect schema metadata loaded through the DecentDB adapter for tables, views,
   columns, indexes, and exposed constraint details
@@ -63,11 +78,10 @@ Current engine capability baseline: **DecentDB v1.6.x**.
 - persist recent files, export defaults, editor settings, and SQL snippets in
   TOML
 - persist workspace tab drafts separately from global config
-- run unit, smoke, widget, and integration tests for the Phase 5 workflow
+- run unit, smoke, widget, and integration tests for the Phase 6 workflow
 
 ### Not implemented yet
 
-- SQL dump import
 - JSON, Parquet, and Excel export
 - legacy binary `.xls` workbook parsing
 

@@ -19,7 +19,7 @@ Finder _fieldWithLabel(String label) {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('renders the phase 3 workspace shell and editor tools', (
+  testWidgets('renders the current workspace shell and editor tools', (
     tester,
   ) async {
     final controller = WorkspaceController(
@@ -268,6 +268,69 @@ void main() {
     expect(find.text('Run a Query'), findsOneWidget);
     expect(gateway.lastExcelImportRequest, isNotNull);
     expect(gateway.lastExcelImportRequest!.targetPath, targetPath);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Run a Query'));
+    await tester.pumpAndSettle();
+
+    expect(controller.databasePath, targetPath);
+    expect(controller.activeTab.sql, contains('SELECT *'));
+  });
+
+  testWidgets('imports a SQL dump through the wizard and opens a query tab', (
+    tester,
+  ) async {
+    final gateway = FakeWorkspaceGateway();
+    final controller = WorkspaceController(
+      gateway: gateway,
+      configStore: InMemoryConfigStore(),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+    final tempDir = await Directory.systemTemp.createTemp('decent-bench-it-');
+    final targetPath = p.join(tempDir.path, 'sql-dump-imported.ddb');
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 1000);
+    addTearDown(() async {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      controller.dispose();
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+    await controller.initialize();
+
+    await tester.pumpWidget(
+      DecentBenchApp(controller: controller, autoInitialize: false),
+    );
+    await tester.pumpAndSettle();
+
+    final importButton = find.widgetWithText(OutlinedButton, 'Import SQL Dump');
+    await tester.ensureVisible(importButton);
+    await tester.tap(importButton);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      _fieldWithLabel('SQL dump source path'),
+      p.join(tempDir.path, 'phase6-source.sql'),
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Inspect Dump'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_fieldWithLabel('DecentDB target path'), targetPath);
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Import'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Run a Query'), findsOneWidget);
+    expect(gateway.lastSqlDumpImportRequest, isNotNull);
+    expect(gateway.lastSqlDumpImportRequest!.targetPath, targetPath);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Run a Query'));
     await tester.pumpAndSettle();

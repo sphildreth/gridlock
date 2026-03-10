@@ -7,10 +7,12 @@ import 'dart:typed_data';
 import 'package:decentdb/decentdb.dart';
 
 import '../domain/excel_import_models.dart';
+import '../domain/sql_dump_import_models.dart';
 import '../domain/sqlite_import_models.dart';
 import '../domain/workspace_models.dart';
 import 'excel_import_support.dart';
 import 'native_library_resolver.dart';
+import 'sql_dump_import_support.dart';
 import 'sqlite_import_support.dart';
 
 abstract class WorkspaceDatabaseGateway {
@@ -53,6 +55,11 @@ abstract class WorkspaceDatabaseGateway {
     required bool headerRow,
   });
 
+  Future<SqlDumpImportInspection> inspectSqlDumpSource({
+    required String sourcePath,
+    required String encoding,
+  });
+
   Future<SqliteImportPreview> loadSqlitePreview({
     required String sourcePath,
     required String tableName,
@@ -64,6 +71,10 @@ abstract class WorkspaceDatabaseGateway {
   });
 
   Stream<ExcelImportUpdate> importExcel({required ExcelImportRequest request});
+
+  Stream<SqlDumpImportUpdate> importSqlDump({
+    required SqlDumpImportRequest request,
+  });
 
   Future<void> cancelImport(String jobId);
 
@@ -81,6 +92,8 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
       <String, _SqliteImportOperation>{};
   final Map<String, _ExcelImportOperation> _excelImports =
       <String, _ExcelImportOperation>{};
+  final Map<String, _SqlDumpImportOperation> _sqlDumpImports =
+      <String, _SqlDumpImportOperation>{};
 
   Isolate? _isolate;
   SendPort? _workerPort;
@@ -232,6 +245,17 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
   }
 
   @override
+  Future<SqlDumpImportInspection> inspectSqlDumpSource({
+    required String sourcePath,
+    required String encoding,
+  }) async {
+    return inspectSqlDumpSourceInBackground(
+      sourcePath,
+      encoding: encoding,
+    );
+  }
+
+  @override
   Future<SqliteImportPreview> loadSqlitePreview({
     required String sourcePath,
     required String tableName,
@@ -275,6 +299,24 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
   }
 
   @override
+  Stream<SqlDumpImportUpdate> importSqlDump({
+    required SqlDumpImportRequest request,
+  }) {
+    final existing = _sqlDumpImports[request.jobId];
+    if (existing != null) {
+      return existing.controller.stream;
+    }
+
+    final operation = _SqlDumpImportOperation(
+      controller: StreamController<SqlDumpImportUpdate>(),
+      receivePort: ReceivePort(),
+    );
+    _sqlDumpImports[request.jobId] = operation;
+    unawaited(_startSqlDumpImportOperation(request, operation));
+    return operation.controller.stream;
+  }
+
+  @override
   Future<void> cancelImport(String jobId) async {
     final operation = _imports[jobId];
     if (operation != null) {
@@ -282,7 +324,12 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
       return;
     }
     final excelOperation = _excelImports[jobId];
-    excelOperation?.commandPort?.send('cancel');
+    if (excelOperation != null) {
+      excelOperation.commandPort?.send('cancel');
+      return;
+    }
+    final sqlDumpOperation = _sqlDumpImports[jobId];
+    sqlDumpOperation?.commandPort?.send('cancel');
   }
 
   @override
@@ -308,6 +355,13 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
       operation.isolate?.kill(priority: Isolate.immediate);
     }
     _excelImports.clear();
+    for (final operation in _sqlDumpImports.values.toList()) {
+      operation.commandPort?.send('cancel');
+      operation.receivePort.close();
+      await operation.controller.close();
+      operation.isolate?.kill(priority: Isolate.immediate);
+    }
+    _sqlDumpImports.clear();
     _responses?.close();
     _responses = null;
     _workerPort = null;
@@ -428,6 +482,50 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
     }
   }
 
+  Future<void> _startSqlDumpImportOperation(
+    SqlDumpImportRequest request,
+    _SqlDumpImportOperation operation,
+  ) async {
+    try {
+      final libraryPath = await initialize();
+      operation.isolate = await Isolate.spawn<List<Object?>>(
+        sqlDumpImportWorkerMain,
+        <Object?>[operation.receivePort.sendPort, libraryPath, request.toMap()],
+      );
+
+      operation.receivePort.listen((message) async {
+        if (message is SendPort) {
+          operation.commandPort = message;
+          return;
+        }
+        if (message is! Map<Object?, Object?>) {
+          return;
+        }
+
+        final update = SqlDumpImportUpdate.fromMap(
+          message.map((key, value) => MapEntry(key as String, value)),
+        );
+        if (!operation.controller.isClosed) {
+          operation.controller.add(update);
+        }
+        if (_isTerminalSqlDumpImportUpdate(update.kind)) {
+          await _closeSqlDumpImportOperation(request.jobId);
+        }
+      });
+    } catch (error, stackTrace) {
+      if (!operation.controller.isClosed) {
+        operation.controller.add(
+          SqlDumpImportUpdate(
+            kind: SqlDumpImportUpdateKind.failed,
+            jobId: request.jobId,
+            message: '$error\n$stackTrace',
+          ),
+        );
+      }
+      await _closeSqlDumpImportOperation(request.jobId);
+    }
+  }
+
   Future<void> _closeImportOperation(String jobId) async {
     final operation = _imports.remove(jobId);
     if (operation == null) {
@@ -442,6 +540,18 @@ class DecentDbBridge implements WorkspaceDatabaseGateway {
 
   Future<void> _closeExcelImportOperation(String jobId) async {
     final operation = _excelImports.remove(jobId);
+    if (operation == null) {
+      return;
+    }
+    operation.receivePort.close();
+    if (!operation.controller.isClosed) {
+      await operation.controller.close();
+    }
+    operation.isolate?.kill(priority: Isolate.immediate);
+  }
+
+  Future<void> _closeSqlDumpImportOperation(String jobId) async {
+    final operation = _sqlDumpImports.remove(jobId);
     if (operation == null) {
       return;
     }
@@ -471,6 +581,18 @@ class _ExcelImportOperation {
   Isolate? isolate;
 }
 
+class _SqlDumpImportOperation {
+  _SqlDumpImportOperation({
+    required this.controller,
+    required this.receivePort,
+  });
+
+  final StreamController<SqlDumpImportUpdate> controller;
+  final ReceivePort receivePort;
+  SendPort? commandPort;
+  Isolate? isolate;
+}
+
 bool _isTerminalImportUpdate(SqliteImportUpdateKind kind) {
   return kind == SqliteImportUpdateKind.completed ||
       kind == SqliteImportUpdateKind.failed ||
@@ -481,6 +603,12 @@ bool _isTerminalExcelImportUpdate(ExcelImportUpdateKind kind) {
   return kind == ExcelImportUpdateKind.completed ||
       kind == ExcelImportUpdateKind.failed ||
       kind == ExcelImportUpdateKind.cancelled;
+}
+
+bool _isTerminalSqlDumpImportUpdate(SqlDumpImportUpdateKind kind) {
+  return kind == SqlDumpImportUpdateKind.completed ||
+      kind == SqlDumpImportUpdateKind.failed ||
+      kind == SqlDumpImportUpdateKind.cancelled;
 }
 
 @pragma('vm:entry-point')

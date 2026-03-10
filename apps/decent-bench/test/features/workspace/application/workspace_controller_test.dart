@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
+import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -188,6 +189,92 @@ void main() {
     expect(gateway.lastCancelledImportJobId, jobId);
     expect(controller.excelImportSession?.phase, ExcelImportJobPhase.cancelled);
     expect(controller.excelImportSession?.summary?.rolledBack, isTrue);
+  });
+
+  test(
+    'sql dump import inspection loads parsed tables, warnings, and import summary',
+    () async {
+      final gateway = FakeWorkspaceGateway();
+      final controller = WorkspaceController(
+        gateway: gateway,
+        configStore: InMemoryConfigStore(),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+      await controller.initialize();
+
+      controller.beginSqlDumpImport();
+      await controller.loadSqlDumpImportSource('/tmp/phase6-source.sql');
+
+      final session = controller.sqlDumpImportSession;
+      expect(session, isNotNull);
+      expect(session!.phase, SqlDumpImportJobPhase.ready);
+      expect(
+        session.tables.map((table) => table.sourceName),
+        contains('people'),
+      );
+      expect(session.warnings, isNotEmpty);
+      expect(session.skippedStatementCount, greaterThan(0));
+      expect(session.focusedTableDraft?.previewRows.first['name'], 'Ada');
+
+      controller.setSqlDumpImportStep(SqlDumpImportWizardStep.transforms);
+      controller.renameSqlDumpImportTable('people', 'imported_people');
+      controller.renameSqlDumpImportColumn('people', 1, 'display_name');
+      await controller.runSqlDumpImport();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(gateway.lastSqlDumpImportRequest, isNotNull);
+      expect(
+        gateway.lastSqlDumpImportRequest!.selectedTables.first.targetName,
+        'imported_people',
+      );
+      expect(
+        gateway
+            .lastSqlDumpImportRequest!
+            .selectedTables
+            .first
+            .columns[1]
+            .targetName,
+        'display_name',
+      );
+      expect(
+        controller.sqlDumpImportSession?.phase,
+        SqlDumpImportJobPhase.completed,
+      );
+      expect(
+        controller.sqlDumpImportSession?.summary?.importedTables,
+        contains('imported_people'),
+      );
+    },
+  );
+
+  test('sql dump import cancellation updates session state', () async {
+    final gateway = FakeWorkspaceGateway()..holdSqlDumpImportOpen = true;
+    final controller = WorkspaceController(
+      gateway: gateway,
+      configStore: InMemoryConfigStore(),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+    await controller.initialize();
+    controller.beginSqlDumpImport();
+    await controller.loadSqlDumpImportSource('/tmp/phase6-cancel.sql');
+
+    await controller.runSqlDumpImport();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(
+      controller.sqlDumpImportSession?.phase,
+      SqlDumpImportJobPhase.running,
+    );
+
+    final jobId = controller.sqlDumpImportSession?.jobId;
+    await controller.cancelSqlDumpImport();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(gateway.lastCancelledImportJobId, jobId);
+    expect(
+      controller.sqlDumpImportSession?.phase,
+      SqlDumpImportJobPhase.cancelled,
+    );
+    expect(controller.sqlDumpImportSession?.summary?.rolledBack, isTrue);
   });
 
   test(

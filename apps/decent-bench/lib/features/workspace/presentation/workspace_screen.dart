@@ -13,6 +13,7 @@ import '../domain/sql_formatter.dart';
 import '../domain/workspace_file_entry.dart';
 import '../domain/workspace_models.dart';
 import 'excel_import_dialog.dart';
+import 'sql_dump_import_dialog.dart';
 import 'sqlite_import_dialog.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -246,13 +247,31 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     controller.closeExcelImportSession();
   }
 
+  Future<void> _showSqlDumpImportDialog({String sourcePath = ''}) async {
+    final controller = widget.controller;
+    if (!controller.hasSqlDumpImportSession || sourcePath.trim().isNotEmpty) {
+      controller.beginSqlDumpImport(sourcePath: sourcePath);
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => SqlDumpImportDialog(controller: controller),
+    );
+    if (!mounted) {
+      return;
+    }
+    controller.closeSqlDumpImportSession();
+  }
+
   Future<void> _handleIncomingFiles(Iterable<String> rawPaths) async {
     final decision = decideWorkspaceIncomingFiles(rawPaths);
     final path = decision.primaryPath;
     if (path == null) {
       await _showIncomingFileNotice(
         title: 'No file detected',
-        message: 'Drop a local DecentDB, SQLite, or Excel file to continue.',
+        message:
+            'Drop a local DecentDB, SQLite, Excel, or SQL dump file to continue.',
       );
       return;
     }
@@ -277,11 +296,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         await _showExcelImportDialog(sourcePath: path);
         break;
       case WorkspaceIncomingFileKind.sqlDump:
-        await _showIncomingFileNotice(
-          title: 'Import type not implemented yet',
-          message:
-              '${p.basename(path)} was recognized, but SQL dump import remains scheduled for a later phase.',
-        );
+        await _showSqlDumpImportDialog(sourcePath: path);
         break;
       case WorkspaceIncomingFileKind.unknown:
         await _showIncomingFileNotice(
@@ -319,7 +334,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     return PanelCard(
       title: 'Workspace',
       subtitle: controller.databasePath == null
-          ? 'Open a DecentDB file, create a new one, or import a dropped SQLite or Excel source.'
+          ? 'Open a DecentDB file, create a new one, or import dropped SQLite, Excel, or SQL dump sources.'
           : controller.databasePath ?? '',
       actions: <Widget>[
         IconButton(
@@ -392,6 +407,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     : () => _showExcelImportDialog(),
                 icon: const Icon(Icons.table_chart_outlined),
                 label: const Text('Import Excel'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: controller.isOpeningDatabase
+                    ? null
+                    : () => _showSqlDumpImportDialog(),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('Import SQL Dump'),
               ),
             ),
             const SizedBox(height: 16),

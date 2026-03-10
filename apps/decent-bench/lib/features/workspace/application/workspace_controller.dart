@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../domain/app_config.dart';
 import '../domain/excel_import_models.dart';
+import '../domain/sql_dump_import_models.dart';
 import '../domain/sqlite_import_models.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_state.dart';
@@ -33,6 +34,7 @@ class WorkspaceController extends ChangeNotifier {
   SchemaSnapshot schema = SchemaSnapshot.empty();
   List<QueryTabState> tabs = const <QueryTabState>[];
   ExcelImportSession? excelImportSession;
+  SqlDumpImportSession? sqlDumpImportSession;
   SqliteImportSession? sqliteImportSession;
 
   String? databasePath;
@@ -49,13 +51,18 @@ class WorkspaceController extends ChangeNotifier {
   String? _activeTabId;
   Timer? _workspaceSaveDebounce;
   StreamSubscription<ExcelImportUpdate>? _excelImportSubscription;
+  StreamSubscription<SqlDumpImportUpdate>? _sqlDumpImportSubscription;
   StreamSubscription<SqliteImportUpdate>? _sqliteImportSubscription;
   bool _disposed = false;
 
   bool get hasOpenDatabase => databasePath != null;
   bool get hasExcelImportSession => excelImportSession != null;
+  bool get hasSqlDumpImportSession => sqlDumpImportSession != null;
   bool get hasSqliteImportSession => sqliteImportSession != null;
-  bool get hasImportSession => hasExcelImportSession || hasSqliteImportSession;
+  bool get hasImportSession =>
+      hasExcelImportSession ||
+      hasSqlDumpImportSession ||
+      hasSqliteImportSession;
 
   String get activeTabId => _activeTabId ?? tabs.first.id;
 
@@ -1082,6 +1089,378 @@ class WorkspaceController extends ChangeNotifier {
     _safeNotify();
   }
 
+  void beginSqlDumpImport({String sourcePath = ''}) {
+    final trimmedSource = sourcePath.trim();
+    sqlDumpImportSession =
+        SqlDumpImportSession.initial(sourcePath: trimmedSource).copyWith(
+          targetPath: trimmedSource.isEmpty
+              ? ''
+              : _suggestImportTargetPath(trimmedSource),
+        );
+    _safeNotify();
+    if (trimmedSource.isNotEmpty) {
+      unawaited(loadSqlDumpImportSource(trimmedSource));
+    }
+  }
+
+  void closeSqlDumpImportSession() {
+    if (sqlDumpImportSession?.phase == SqlDumpImportJobPhase.running ||
+        sqlDumpImportSession?.phase == SqlDumpImportJobPhase.cancelling) {
+      return;
+    }
+    sqlDumpImportSession = null;
+    _safeNotify();
+  }
+
+  Future<void> loadSqlDumpImportSource(String rawPath) async {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) {
+      _setSqlDumpImportError('Choose a SQL dump file first.');
+      return;
+    }
+
+    final session =
+        sqlDumpImportSession ??
+        SqlDumpImportSession.initial(sourcePath: normalized);
+    sqlDumpImportSession = session.copyWith(
+      phase: SqlDumpImportJobPhase.inspecting,
+      sourcePath: normalized,
+      targetPath: session.targetPath.trim().isEmpty
+          ? _suggestImportTargetPath(normalized)
+          : session.targetPath,
+      tables: const <SqlDumpImportTableDraft>[],
+      warnings: const <String>[],
+      skippedStatements: const <SqlDumpImportSkippedStatement>[],
+      totalStatements: 0,
+      focusedTable: null,
+      progress: null,
+      summary: null,
+      error: null,
+      jobId: null,
+    );
+    _safeNotify();
+
+    try {
+      final inspection = await _gateway.inspectSqlDumpSource(
+        sourcePath: normalized,
+        encoding: session.encoding,
+      );
+      final focused = inspection.tables.isEmpty
+          ? null
+          : inspection.tables.first.sourceName;
+      sqlDumpImportSession = sqlDumpImportSession?.copyWith(
+        phase: SqlDumpImportJobPhase.ready,
+        sourcePath: inspection.sourcePath,
+        encoding: inspection.requestedEncoding,
+        resolvedEncoding: inspection.resolvedEncoding,
+        tables: inspection.tables,
+        warnings: inspection.warnings,
+        skippedStatements: inspection.skippedStatements,
+        totalStatements: inspection.totalStatements,
+        focusedTable: focused,
+        error: inspection.tables.isEmpty
+            ? 'No supported CREATE TABLE statements were parsed from the selected dump.'
+            : null,
+      );
+      _safeNotify();
+    } catch (error) {
+      _setSqlDumpImportError(
+        error.toString(),
+        phase: SqlDumpImportJobPhase.failed,
+      );
+    }
+  }
+
+  Future<void> updateSqlDumpImportEncoding(String value) async {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(encoding: value, error: null);
+    _safeNotify();
+    if (session.sourcePath.trim().isNotEmpty) {
+      await loadSqlDumpImportSource(session.sourcePath);
+    }
+  }
+
+  void setSqlDumpImportStep(SqlDumpImportWizardStep step) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(step: step, error: null);
+    _safeNotify();
+  }
+
+  void updateSqlDumpImportTargetPath(String value) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(targetPath: value, error: null);
+    _safeNotify();
+  }
+
+  void updateSqlDumpImportIntoExistingTarget(bool value) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(
+      importIntoExistingTarget: value,
+      replaceExistingTarget: value ? false : session.replaceExistingTarget,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void updateSqlDumpImportReplaceExistingTarget(bool value) {
+    final session = sqlDumpImportSession;
+    if (session == null || session.importIntoExistingTarget) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(
+      replaceExistingTarget: value,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void toggleSqlDumpImportTableSelection(String sourceName, bool selected) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+
+    final updatedTables = <SqlDumpImportTableDraft>[
+      for (final table in session.tables)
+        if (table.sourceName == sourceName)
+          table.copyWith(selected: selected)
+        else
+          table,
+    ];
+    String? focused;
+    if (updatedTables.any(
+      (table) => table.sourceName == session.focusedTable && table.selected,
+    )) {
+      focused = session.focusedTable;
+    } else {
+      for (final table in updatedTables) {
+        if (table.selected) {
+          focused = table.sourceName;
+          break;
+        }
+      }
+    }
+    sqlDumpImportSession = session.copyWith(
+      tables: updatedTables,
+      focusedTable: focused,
+      error: null,
+    );
+    _safeNotify();
+  }
+
+  void focusSqlDumpImportTable(String sourceName) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(focusedTable: sourceName);
+    _safeNotify();
+  }
+
+  void renameSqlDumpImportTable(String sourceName, String targetName) {
+    _mutateSqlDumpImportTable(
+      sourceName,
+      (table) => table.copyWith(targetName: targetName),
+    );
+  }
+
+  void renameSqlDumpImportColumn(
+    String sourceTableName,
+    int sourceColumnIndex,
+    String targetName,
+  ) {
+    _mutateSqlDumpImportTable(
+      sourceTableName,
+      (table) => table.copyWith(
+        columns: <SqlDumpImportColumnDraft>[
+          for (final column in table.columns)
+            if (column.sourceIndex == sourceColumnIndex)
+              column.copyWith(targetName: targetName)
+            else
+              column,
+        ],
+      ),
+    );
+  }
+
+  void overrideSqlDumpImportColumnType(
+    String sourceTableName,
+    int sourceColumnIndex,
+    String targetType,
+  ) {
+    _mutateSqlDumpImportTable(
+      sourceTableName,
+      (table) => table.copyWith(
+        columns: <SqlDumpImportColumnDraft>[
+          for (final column in table.columns)
+            if (column.sourceIndex == sourceColumnIndex)
+              column.copyWith(targetType: targetType)
+            else
+              column,
+        ],
+      ),
+    );
+  }
+
+  Future<void> runSqlDumpImport() async {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    if (session.selectedTables.isEmpty) {
+      _setSqlDumpImportError('Select at least one parsed table to import.');
+      return;
+    }
+    if (!session.canAdvanceFromTransforms) {
+      _setSqlDumpImportError(
+        'Resolve duplicate or empty target names before starting the import.',
+      );
+      return;
+    }
+    if (session.targetPath.trim().isEmpty) {
+      _setSqlDumpImportError('Choose a target DecentDB file first.');
+      return;
+    }
+
+    await _sqlDumpImportSubscription?.cancel();
+    final jobId = createSqlDumpImportJobId();
+    final request = SqlDumpImportRequest(
+      jobId: jobId,
+      sourcePath: session.sourcePath,
+      targetPath: session.targetPath.trim(),
+      importIntoExistingTarget: session.importIntoExistingTarget,
+      replaceExistingTarget: session.replaceExistingTarget,
+      encoding: session.encoding,
+      tables: session.tables,
+    );
+
+    sqlDumpImportSession = session.copyWith(
+      step: SqlDumpImportWizardStep.execute,
+      phase: SqlDumpImportJobPhase.running,
+      error: null,
+      summary: null,
+      jobId: jobId,
+      progress: SqlDumpImportProgress(
+        jobId: jobId,
+        currentTable: request.selectedTables.first.targetName,
+        completedTables: 0,
+        totalTables: request.selectedTables.length,
+        currentTableRowsCopied: 0,
+        currentTableRowCount: request.selectedTables.first.rowCount,
+        totalRowsCopied: 0,
+        message: 'Preparing SQL dump import...',
+      ),
+    );
+    _safeNotify();
+
+    _sqlDumpImportSubscription = _gateway.importSqlDump(request: request).listen(
+      (update) {
+        final current = sqlDumpImportSession;
+        if (current == null || current.jobId != update.jobId) {
+          return;
+        }
+
+        switch (update.kind) {
+          case SqlDumpImportUpdateKind.progress:
+            sqlDumpImportSession = current.copyWith(
+              phase: current.phase == SqlDumpImportJobPhase.cancelling
+                  ? SqlDumpImportJobPhase.cancelling
+                  : SqlDumpImportJobPhase.running,
+              progress: update.progress,
+              error: null,
+            );
+            break;
+          case SqlDumpImportUpdateKind.completed:
+            sqlDumpImportSession = current.copyWith(
+              step: SqlDumpImportWizardStep.summary,
+              phase: SqlDumpImportJobPhase.completed,
+              summary: update.summary,
+              error: null,
+            );
+            workspaceMessage = update.summary?.statusMessage;
+            workspaceError = null;
+            break;
+          case SqlDumpImportUpdateKind.cancelled:
+            sqlDumpImportSession = current.copyWith(
+              step: SqlDumpImportWizardStep.summary,
+              phase: SqlDumpImportJobPhase.cancelled,
+              summary: update.summary,
+              error: null,
+            );
+            workspaceMessage = update.summary?.statusMessage;
+            workspaceError = null;
+            break;
+          case SqlDumpImportUpdateKind.failed:
+            sqlDumpImportSession = current.copyWith(
+              step: SqlDumpImportWizardStep.summary,
+              phase: SqlDumpImportJobPhase.failed,
+              error: update.message ?? 'SQL dump import failed.',
+            );
+            break;
+        }
+        _safeNotify();
+      },
+    );
+  }
+
+  Future<void> cancelSqlDumpImport() async {
+    final session = sqlDumpImportSession;
+    if (session == null || session.jobId == null) {
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(
+      phase: SqlDumpImportJobPhase.cancelling,
+      error: null,
+    );
+    _safeNotify();
+    try {
+      await _gateway.cancelImport(session.jobId!);
+    } catch (error) {
+      _setSqlDumpImportError(
+        error.toString(),
+        phase: SqlDumpImportJobPhase.failed,
+      );
+    }
+  }
+
+  Future<void> openSqlDumpImportedDatabaseFromSummary() async {
+    final summary = sqlDumpImportSession?.summary;
+    if (summary == null) {
+      return;
+    }
+    await openDatabase(summary.targetPath, createIfMissing: false);
+    sqlDumpImportSession = null;
+    _safeNotify();
+  }
+
+  Future<void> runQueryForSqlDumpImportedTable() async {
+    final summary = sqlDumpImportSession?.summary;
+    if (summary == null) {
+      return;
+    }
+    await openDatabase(summary.targetPath, createIfMissing: false);
+    if (summary.firstImportedTable != null) {
+      createTab(
+        sql:
+            'SELECT *\nFROM ${_quoteIdentifier(summary.firstImportedTable!)}\nLIMIT ${config.defaultPageSize};',
+      );
+    }
+    sqlDumpImportSession = null;
+    _safeNotify();
+  }
+
   void beginSqliteImport({String sourcePath = ''}) {
     final trimmedSource = sourcePath.trim();
     sqliteImportSession = SqliteImportSession.initial(sourcePath: trimmedSource)
@@ -1495,6 +1874,9 @@ class WorkspaceController extends ChangeNotifier {
   String createExcelImportJobId() =>
       'excel-import-${DateTime.now().microsecondsSinceEpoch}';
 
+  String createSqlDumpImportJobId() =>
+      'sql-dump-import-${DateTime.now().microsecondsSinceEpoch}';
+
   String createSqliteImportJobId() =>
       'sqlite-import-${DateTime.now().microsecondsSinceEpoch}';
 
@@ -1560,6 +1942,7 @@ class WorkspaceController extends ChangeNotifier {
     _disposed = true;
     _workspaceSaveDebounce?.cancel();
     unawaited(_excelImportSubscription?.cancel() ?? Future<void>.value());
+    unawaited(_sqlDumpImportSubscription?.cancel() ?? Future<void>.value());
     unawaited(_sqliteImportSubscription?.cancel() ?? Future<void>.value());
     if (hasOpenDatabase) {
       unawaited(_persistWorkspaceStateNow());
@@ -1666,6 +2049,21 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  void _setSqlDumpImportError(String message, {SqlDumpImportJobPhase? phase}) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      workspaceError = message;
+      workspaceMessage = null;
+      _safeNotify();
+      return;
+    }
+    sqlDumpImportSession = session.copyWith(
+      error: message,
+      phase: phase ?? session.phase,
+    );
+    _safeNotify();
+  }
+
   void _setExcelImportError(String message, {ExcelImportJobPhase? phase}) {
     final session = excelImportSession;
     if (session == null) {
@@ -1692,6 +2090,25 @@ class WorkspaceController extends ChangeNotifier {
     sqliteImportSession = session.copyWith(
       error: message,
       phase: phase ?? session.phase,
+    );
+    _safeNotify();
+  }
+
+  void _mutateSqlDumpImportTable(
+    String sourceName,
+    SqlDumpImportTableDraft Function(SqlDumpImportTableDraft table) transform,
+  ) {
+    final session = sqlDumpImportSession;
+    if (session == null) {
+      return;
+    }
+    final updatedTables = <SqlDumpImportTableDraft>[
+      for (final table in session.tables)
+        if (table.sourceName == sourceName) transform(table) else table,
+    ];
+    sqlDumpImportSession = session.copyWith(
+      tables: updatedTables,
+      error: null,
     );
     _safeNotify();
   }
