@@ -2,6 +2,190 @@ import 'package:flutter/material.dart';
 
 import '../../application/menu_command_registry.dart';
 
+class NativeAppMenuHost extends StatelessWidget {
+  const NativeAppMenuHost({
+    super.key,
+    required this.registry,
+    required this.recentFiles,
+    required this.onOpenRecent,
+    required this.child,
+  });
+
+  final MenuCommandRegistry registry;
+  final List<String> recentFiles;
+  final ValueChanged<String> onOpenRecent;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return PlatformMenuBar(menus: _buildPlatformMenus(), child: child);
+  }
+
+  List<PlatformMenuItem> _buildPlatformMenus() {
+    return <PlatformMenuItem>[
+      PlatformMenu(
+        label: 'File',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('file_new'),
+              _platformCommandItem('file_open'),
+              PlatformMenu(
+                label: 'Open Recent',
+                menus: recentFiles.isEmpty
+                    ? <PlatformMenuItem>[
+                        const PlatformMenuItem(label: 'No recent workspaces'),
+                      ]
+                    : <PlatformMenuItem>[
+                        for (final path in recentFiles)
+                          PlatformMenuItem(
+                            label: path,
+                            onSelected: () => onOpenRecent(path),
+                          ),
+                      ],
+              ),
+              _platformCommandItem('file_save'),
+              _platformCommandItem('file_save_as'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('file_close'),
+              _platformCommandItem('file_exit'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'Edit',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('edit_undo'),
+              _platformCommandItem('edit_redo'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('edit_cut'),
+              _platformCommandItem('edit_copy'),
+              _platformCommandItem('edit_paste'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('edit_find'),
+              _platformCommandItem('edit_find_next'),
+              _platformCommandItem('edit_select_all'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'Import',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('import_excel'),
+              _platformCommandItem('import_sqlite'),
+              _platformCommandItem('import_sql_dump'),
+              _platformCommandItem('import_from_database'),
+              _platformCommandItem('import_rerun_last'),
+              _platformCommandItem('import_open_wizard'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'Export',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('export_results_csv'),
+              _platformCommandItem('export_results_json'),
+              _platformCommandItem('export_results_parquet'),
+              _platformCommandItem('export_results_excel'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('export_table'),
+              _platformCommandItem('export_schema'),
+              _platformCommandItem('export_rerun_last'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'View',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('view_reset_layout'),
+              _platformCommandItem('view_toggle_schema'),
+              _platformCommandItem('view_toggle_properties'),
+              _platformCommandItem('view_toggle_results'),
+              _platformCommandItem('view_toggle_status_bar'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('view_zoom_in'),
+              _platformCommandItem('view_zoom_out'),
+              _platformCommandItem('view_zoom_reset'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'Tools',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('tools_run_query'),
+              _platformCommandItem('tools_stop_query'),
+              _platformCommandItem('tools_format_sql'),
+              _platformCommandItem('tools_new_query_tab'),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('tools_query_history'),
+              _platformCommandItem('tools_snippets'),
+              _platformCommandItem('tools_manage_connections'),
+              _platformCommandItem('tools_options'),
+            ],
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: 'Help',
+        menus: <PlatformMenuItem>[
+          PlatformMenuItemGroup(
+            members: <PlatformMenuItem>[
+              _platformCommandItem('help_docs'),
+              _platformCommandItem('help_keyboard_shortcuts'),
+              _platformCommandItem('help_about'),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
+
+  PlatformMenuItem _platformCommandItem(String commandId) {
+    final command = registry[commandId];
+    if (command == null) {
+      return const PlatformMenuItem(label: 'Missing');
+    }
+    return PlatformMenuItem(
+      label: command.checked ? '✓ ${command.label}' : command.label,
+      shortcut: command.shortcut?.activator,
+      onSelected: command.enabled ? () => registry.invoke(commandId) : null,
+    );
+  }
+}
+
 class AppMenuBar extends StatelessWidget {
   const AppMenuBar({
     super.key,
@@ -17,6 +201,8 @@ class AppMenuBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
+      alignment: Alignment.centerLeft,
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(

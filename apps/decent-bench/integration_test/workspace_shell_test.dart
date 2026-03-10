@@ -12,7 +12,7 @@ import '../test/support/fakes.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('renders the desktop shell proof', (tester) async {
+  testWidgets('renders the desktop shell', (tester) async {
     final controller = WorkspaceController(
       gateway: FakeWorkspaceGateway(),
       configStore: InMemoryConfigStore(),
@@ -36,7 +36,7 @@ void main() {
     expect(find.text('Schema Explorer'), findsOneWidget);
     expect(find.text('SQL Editor'), findsOneWidget);
     expect(find.text('Results Window'), findsOneWidget);
-    expect(find.text('Help'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Format'), findsOneWidget);
   });
 
   testWidgets('opens a workspace and runs a query inside the shell', (

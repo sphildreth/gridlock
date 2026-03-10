@@ -25,6 +25,8 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  flutter_menu_plugin_ = std::make_unique<FlutterMenuPlugin>(
+      flutter_controller_->engine()->messenger(), GetHandle());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -43,8 +45,14 @@ void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
+  flutter_menu_plugin_ = nullptr;
 
   Win32Window::OnDestroy();
+}
+
+bool FlutterWindow::TranslateAcceleratorMessage(MSG* message) const {
+  return flutter_menu_plugin_ != nullptr &&
+         flutter_menu_plugin_->TranslateAcceleratorMessage(message);
 }
 
 LRESULT
@@ -59,6 +67,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (result) {
       return *result;
     }
+  }
+
+  if (flutter_menu_plugin_ != nullptr &&
+      flutter_menu_plugin_->HandleMessage(message, wparam, lparam)) {
+    return 0;
   }
 
   switch (message) {

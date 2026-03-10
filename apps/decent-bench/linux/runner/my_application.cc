@@ -5,11 +5,15 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include "flutter_menu_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlView* view;
+  GtkWidget* content_box;
+  FlutterMenuPlugin* menu_plugin;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -59,13 +63,19 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
+  self->view = view;
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
   gdk_rgba_parse(&background_color, "#000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
-  gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
+
+  GtkWidget* content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  self->content_box = content_box;
+  gtk_widget_show(content_box);
+  gtk_container_add(GTK_CONTAINER(window), content_box);
+  gtk_box_pack_end(GTK_BOX(content_box), GTK_WIDGET(view), TRUE, TRUE, 0);
 
   // Show the window when Flutter renders.
   // Requires the view to be realized so we can start rendering.
@@ -74,6 +84,10 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  FlEngine* engine = fl_view_get_engine(view);
+  FlBinaryMessenger* messenger = fl_engine_get_binary_messenger(engine);
+  self->menu_plugin =
+      new FlutterMenuPlugin(messenger, window, GTK_BOX(content_box));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -120,6 +134,8 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  delete self->menu_plugin;
+  self->menu_plugin = nullptr;
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
@@ -133,7 +149,11 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->view = nullptr;
+  self->content_box = nullptr;
+  self->menu_plugin = nullptr;
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems

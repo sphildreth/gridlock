@@ -58,13 +58,17 @@ void main() {
     controller.updateActiveSql('SELECT id, title FROM tasks ORDER BY id');
     await controller.runActiveTab();
     expect(controller.activeTab.resultRows.single['title'], 'Ship phase 1');
-    expect(controller.activeTab.phase, QueryPhase.running);
+    expect(controller.activeTab.phase, QueryPhase.completed);
+    expect(controller.canRunActiveTab, isTrue);
+    expect(controller.canCancelActiveTab, isFalse);
 
     controller.createTab();
     controller.updateActiveSql('SELECT id, name FROM projects ORDER BY id');
     await controller.runActiveTab();
     expect(controller.activeTab.resultRows.single['name'], 'Phase 3');
-    expect(controller.activeTab.phase, QueryPhase.running);
+    expect(controller.activeTab.phase, QueryPhase.completed);
+    expect(controller.canRunActiveTab, isTrue);
+    expect(controller.canCancelActiveTab, isFalse);
 
     final secondTabId = controller.activeTabId;
     controller.previousTab();
@@ -80,8 +84,9 @@ void main() {
 
     await controller.cancelTabQuery(controller.tabs.first.id);
     controller.selectTab(controller.tabs.first.id);
-    expect(controller.activeTab.phase, QueryPhase.cancelled);
-    expect(controller.activeTab.isResultPartial, isTrue);
+    expect(controller.activeTab.phase, QueryPhase.completed);
+    expect(controller.activeTab.isResultPartial, isFalse);
+    expect(controller.activeTab.hasMoreRows, isTrue);
   });
 
   test('reopening the same database restores persisted tab drafts', () async {
@@ -121,6 +126,45 @@ void main() {
     secondController.previousTab();
     expect(secondController.activeTab.parameterJson, '[1]');
   });
+
+  test(
+    'reopening the same database restores per-tab query and message history',
+    () async {
+      final dbPath =
+          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final configStore = InMemoryConfigStore();
+      final workspaceStateStore = InMemoryWorkspaceStateStore();
+
+      final firstController = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: configStore,
+        workspaceStateStore: workspaceStateStore,
+      );
+      await firstController.initialize();
+      await firstController.openDatabase(dbPath, createIfMissing: true);
+      firstController.updateActiveSql(
+        'SELECT id, title FROM tasks ORDER BY id',
+      );
+      await firstController.runActiveTab();
+      await firstController.fetchNextPage();
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+
+      final secondController = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: configStore,
+        workspaceStateStore: workspaceStateStore,
+      );
+      await secondController.initialize();
+      await secondController.openDatabase(dbPath, createIfMissing: false);
+
+      expect(secondController.activeTab.queryHistory, hasLength(1));
+      expect(
+        secondController.activeTab.queryHistory.single.outcome,
+        QueryHistoryOutcome.completed,
+      );
+      expect(secondController.activeTab.messageHistory, isNotEmpty);
+    },
+  );
 
   test(
     'excel import inspection loads sheets, previews, and import summary',

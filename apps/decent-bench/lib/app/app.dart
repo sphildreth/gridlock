@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_metadata.dart';
 import '../features/workspace/application/workspace_controller.dart';
 import '../features/workspace/infrastructure/app_lifecycle_service.dart';
 import '../features/workspace/presentation/workspace_screen.dart';
@@ -44,7 +45,7 @@ class _DecentBenchAppState extends State<DecentBenchApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Decent Bench',
+      title: kDecentBenchDisplayName,
       debugShowCheckedModeBanner: false,
       theme: buildDecentBenchTheme(),
       home: WorkspaceScreen(

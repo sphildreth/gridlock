@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'workspace_models.dart';
+
 class WorkspaceTabDraft {
   const WorkspaceTabDraft({
     required this.id,
@@ -7,6 +9,8 @@ class WorkspaceTabDraft {
     required this.sql,
     required this.parameterJson,
     required this.exportPath,
+    this.messageHistory = const <QueryMessageEntry>[],
+    this.queryHistory = const <QueryHistoryEntry>[],
   });
 
   final String id;
@@ -14,6 +18,8 @@ class WorkspaceTabDraft {
   final String sql;
   final String parameterJson;
   final String exportPath;
+  final List<QueryMessageEntry> messageHistory;
+  final List<QueryHistoryEntry> queryHistory;
 
   Map<String, Object?> toJson() {
     return <String, Object?>{
@@ -22,6 +28,12 @@ class WorkspaceTabDraft {
       'sql': sql,
       'parameterJson': parameterJson,
       'exportPath': exportPath,
+      'messageHistory': <Map<String, Object?>>[
+        for (final entry in messageHistory) entry.toJson(),
+      ],
+      'queryHistory': <Map<String, Object?>>[
+        for (final entry in queryHistory) entry.toJson(),
+      ],
     };
   }
 
@@ -32,6 +44,22 @@ class WorkspaceTabDraft {
       sql: map['sql']! as String,
       parameterJson: map['parameterJson']! as String,
       exportPath: map['exportPath'] as String? ?? '',
+      messageHistory: ((map['messageHistory'] as List?) ?? const <Object?>[])
+          .cast<Map<Object?, Object?>>()
+          .map(
+            (entry) => QueryMessageEntry.fromJson(
+              entry.map((key, value) => MapEntry(key as String, value)),
+            ),
+          )
+          .toList(),
+      queryHistory: ((map['queryHistory'] as List?) ?? const <Object?>[])
+          .cast<Map<Object?, Object?>>()
+          .map(
+            (entry) => QueryHistoryEntry.fromJson(
+              entry.map((key, value) => MapEntry(key as String, value)),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -43,7 +71,7 @@ class PersistedWorkspaceState {
     required this.tabs,
   });
 
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
 
   final int schemaVersion;
   final String? activeTabId;

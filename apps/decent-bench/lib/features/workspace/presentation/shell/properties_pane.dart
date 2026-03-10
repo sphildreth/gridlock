@@ -1,51 +1,32 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/workspace_models.dart';
+import 'schema_browser_models.dart';
 import 'shell_pane_frame.dart';
 
 class PropertiesPane extends StatelessWidget {
-  const PropertiesPane({
-    super.key,
-    required this.object,
-    required this.relatedIndexes,
-    required this.notes,
-  });
+  const PropertiesPane({super.key, required this.selection});
 
-  final SchemaObjectSummary? object;
-  final List<IndexSummary> relatedIndexes;
-  final List<String> notes;
+  final SchemaSelectionDetails? selection;
 
   @override
   Widget build(BuildContext context) {
-    final resolvedObject = object;
+    final resolvedSelection = selection;
     return ShellPaneFrame(
       title: 'Properties / Details',
-      subtitle: resolvedObject == null
-          ? 'Inspector'
-          : '${resolvedObject.kind.name} metadata',
+      subtitle: resolvedSelection?.subtitle ?? 'Inspector',
       leadingIcon: Icons.info_outline,
       padding: EdgeInsets.zero,
-      child: resolvedObject == null
-          ? _SampleInspector(notes: notes)
-          : _ObjectInspector(
-              object: resolvedObject,
-              relatedIndexes: relatedIndexes,
-              notes: notes,
-            ),
+      child: resolvedSelection == null
+          ? const _SampleInspector()
+          : _SelectionInspector(selection: resolvedSelection),
     );
   }
 }
 
-class _ObjectInspector extends StatelessWidget {
-  const _ObjectInspector({
-    required this.object,
-    required this.relatedIndexes,
-    required this.notes,
-  });
+class _SelectionInspector extends StatelessWidget {
+  const _SelectionInspector({required this.selection});
 
-  final SchemaObjectSummary object;
-  final List<IndexSummary> relatedIndexes;
-  final List<String> notes;
+  final SchemaSelectionDetails selection;
 
   @override
   Widget build(BuildContext context) {
@@ -55,43 +36,21 @@ class _ObjectInspector extends StatelessWidget {
       children: <Widget>[
         _PropertyTable(
           rows: <MapEntry<String, String>>[
-            MapEntry('Name', object.name),
-            MapEntry('Type', object.kind.name),
-            MapEntry('Columns', '${object.columns.length}'),
-            MapEntry('Indexes', '${relatedIndexes.length}'),
+            MapEntry('Label', selection.label),
+            MapEntry('Kind', selection.kind.name),
+            if (selection.objectName != null)
+              MapEntry('Object', selection.objectName!),
+            ...selection.summaryRows,
           ],
         ),
-        const SizedBox(height: 12),
-        Text('Columns', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
-        for (final column in object.columns)
-          _InspectorRow(
-            title: column.name,
-            subtitle: column.descriptor,
-            icon: Icons.view_column_outlined,
-          ),
-        const SizedBox(height: 12),
-        Text('Indexes', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
-        if (relatedIndexes.isEmpty)
-          const _MutedNote('No indexes exposed for this object.')
-        else
-          for (final index in relatedIndexes)
-            _InspectorRow(
-              title: index.name,
-              subtitle:
-                  '${index.unique ? 'UNIQUE ' : ''}${index.kind} (${index.columns.join(", ")})',
-              icon: Icons.filter_alt_outlined,
-            ),
-        const SizedBox(height: 12),
-        Text('Constraints / Notes', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
-        for (final note in <String>[
-          ...object.exposedConstraintSummaries,
-          ...notes,
-        ])
-          _MutedNote(note),
-        if (object.ddl != null) ...<Widget>[
+        if (selection.notes.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          Text('Metadata / Notes', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 8),
+          for (final note in selection.notes) _MutedNote(note),
+        ],
+        if (selection.definition != null &&
+            selection.definition!.trim().isNotEmpty) ...<Widget>[
           const SizedBox(height: 12),
           Text('Definition', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),
@@ -99,7 +58,7 @@ class _ObjectInspector extends StatelessWidget {
             color: theme.colorScheme.surfaceContainerLowest,
             padding: const EdgeInsets.all(10),
             child: SelectableText(
-              object.ddl!,
+              selection.definition!,
               style: theme.textTheme.bodySmall?.copyWith(
                 fontFamily: 'monospace',
                 height: 1.4,
@@ -113,43 +72,28 @@ class _ObjectInspector extends StatelessWidget {
 }
 
 class _SampleInspector extends StatelessWidget {
-  const _SampleInspector({required this.notes});
-
-  final List<String> notes;
+  const _SampleInspector();
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(12),
-      children: <Widget>[
-        const _PropertyTable(
+      children: const <Widget>[
+        _PropertyTable(
           rows: <MapEntry<String, String>>[
-            MapEntry('Name', 'orders'),
-            MapEntry('Type', 'table'),
-            MapEntry('Primary key', 'id'),
-            MapEntry('Estimated rows', '42,180'),
+            MapEntry('Label', 'sample.decentdb'),
+            MapEntry('Kind', 'database'),
+            MapEntry('Tables', '2'),
+            MapEntry('Indexes', '2'),
           ],
         ),
-        const SizedBox(height: 12),
-        const _InspectorRow(
-          title: 'id',
-          subtitle: 'INTEGER | PRIMARY KEY | NOT NULL',
-          icon: Icons.view_column_outlined,
+        SizedBox(height: 12),
+        _MutedNote(
+          'Select a database object, column, constraint, or index in Schema Explorer to inspect it here.',
         ),
-        const _InspectorRow(
-          title: 'customer_id',
-          subtitle: 'INTEGER | REFERENCES customers(id)',
-          icon: Icons.view_column_outlined,
+        _MutedNote(
+          'The inspector is designed to work for folders and metadata nodes, not only table objects.',
         ),
-        const _InspectorRow(
-          title: 'total',
-          subtitle: 'DECIMAL(12,2)',
-          icon: Icons.view_column_outlined,
-        ),
-        const SizedBox(height: 12),
-        const _MutedNote('Index: idx_orders_customer (customer_id)'),
-        const _MutedNote('Constraint: CHECK(total >= 0)'),
-        for (final note in notes) _MutedNote(note),
       ],
     );
   }
@@ -178,7 +122,7 @@ class _PropertyTable extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   SizedBox(
-                    width: 120,
+                    width: 140,
                     child: Text(
                       rows[i].key,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -196,67 +140,18 @@ class _PropertyTable extends StatelessWidget {
   }
 }
 
-class _InspectorRow extends StatelessWidget {
-  const _InspectorRow({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
+class _MutedNote extends StatelessWidget {
+  const _MutedNote(this.text);
 
-  final String title;
-  final String subtitle;
-  final IconData icon;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(icon, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(title, style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MutedNote extends StatelessWidget {
-  const _MutedNote(this.message);
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(
-        message,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-      ),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      child: Text(text),
     );
   }
 }

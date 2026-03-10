@@ -18,6 +18,9 @@ import '../infrastructure/layout_persistence_service.dart';
 import '../infrastructure/workspace_state_store.dart';
 
 class WorkspaceController extends ChangeNotifier {
+  static const int _maxQueryHistoryEntries = 40;
+  static const int _maxMessageHistoryEntries = 80;
+
   WorkspaceController({
     WorkspaceDatabaseGateway? gateway,
     WorkspaceConfigStore? configStore,
@@ -74,6 +77,14 @@ class WorkspaceController extends ChangeNotifier {
 
   QueryTabState get activeTab =>
       tabs.firstWhere((tab) => tab.id == activeTabId);
+
+  List<QueryHistoryEntry> get queryHistory {
+    final entries = <QueryHistoryEntry>[
+      for (final tab in tabs) ...tab.queryHistory,
+    ];
+    entries.sort((left, right) => right.ranAt.compareTo(left.ranAt));
+    return entries;
+  }
 
   bool get hasRunningTabs => tabs.any(
     (tab) =>
@@ -267,6 +278,27 @@ class WorkspaceController extends ChangeNotifier {
     selectTab(tabs[nextIndex].id);
   }
 
+  void loadHistoryEntryIntoActiveTab(
+    QueryHistoryEntry entry, {
+    bool openInNewTab = false,
+  }) {
+    if (openInNewTab) {
+      createTab(sql: entry.sql);
+    }
+    _mutateActiveTab(
+      (tab) => tab.copyWith(sql: entry.sql, parameterJson: entry.parameterJson),
+      persist: true,
+    );
+  }
+
+  Future<void> rerunHistoryEntry(
+    QueryHistoryEntry entry, {
+    bool openInNewTab = false,
+  }) async {
+    loadHistoryEntryIntoActiveTab(entry, openInNewTab: openInNewTab);
+    await runActiveTab();
+  }
+
   void createTab({String? sql}) {
     final title = _newTabTitle();
     final tab = QueryTabState.initial(
@@ -347,6 +379,7 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
 
+    final startedAt = DateTime.now();
     final generation = tab.executionGeneration + 1;
     final previousCursor = tab.cursorId;
     _mutateTab(
@@ -359,12 +392,20 @@ class WorkspaceController extends ChangeNotifier {
         error: null,
         statusMessage: 'Executing SQL...',
         lastSql: trimmedSql,
+        lastParameterJson: tab.parameterJson,
         lastParams: params,
+        lastRunStartedAt: startedAt,
         rowsAffected: null,
         elapsed: null,
         hasMoreRows: false,
         isResultPartial: false,
         executionGeneration: generation,
+        messageHistory: _appendMessage(
+          current.messageHistory,
+          QueryMessageLevel.info,
+          'Executing SQL...',
+          timestamp: startedAt,
+        ),
       ),
       notify: false,
     );
@@ -387,33 +428,71 @@ class WorkspaceController extends ChangeNotifier {
         return;
       }
 
-      _mutateTab(
-        tabId,
-        (current) => _applyFirstPage(
+      _mutateTab(tabId, (current) {
+        final statusMessage = page.rowsAffected != null
+            ? 'Statement completed with ${page.rowsAffected} affected rows.'
+            : 'Loaded ${page.rows.length} rows from the first page.';
+        final updated = _applyFirstPage(
           current,
           page,
-          statusMessage: page.rowsAffected != null
-              ? 'Statement completed with ${page.rowsAffected} affected rows.'
-              : 'Loaded ${page.rows.length} rows from the first page.',
-        ),
-        notify: false,
-      );
+          statusMessage: statusMessage,
+        );
+        final withMessage = updated.copyWith(
+          messageHistory: _appendMessage(
+            updated.messageHistory,
+            QueryMessageLevel.info,
+            statusMessage,
+          ),
+        );
+        if (!page.done) {
+          return withMessage;
+        }
+        return withMessage.copyWith(
+          queryHistory: _appendQueryHistory(
+            withMessage.queryHistory,
+            _buildQueryHistoryEntry(
+              withMessage,
+              outcome: QueryHistoryOutcome.completed,
+              rowsLoaded: withMessage.resultRows.length,
+              rowsAffected: withMessage.rowsAffected,
+              elapsed: withMessage.elapsed,
+            ),
+          ),
+        );
+      }, notify: false);
     } catch (error) {
       if (_isCurrentGeneration(tabId, generation)) {
-        _mutateTab(
-          tabId,
-          (current) => current.copyWith(
+        _mutateTab(tabId, (current) {
+          final failure = QueryErrorDetails.fromError(
+            error,
+            stage: QueryErrorStage.opening,
+          );
+          final updated = current.copyWith(
             phase: QueryPhase.failed,
-            error: QueryErrorDetails.fromError(
-              error,
-              stage: QueryErrorStage.opening,
-            ),
+            error: failure,
             statusMessage: null,
             cursorId: null,
             hasMoreRows: false,
-          ),
-          notify: false,
-        );
+            messageHistory: _appendMessage(
+              current.messageHistory,
+              QueryMessageLevel.error,
+              '${failure.stageLabel}: ${failure.message}',
+            ),
+          );
+          return updated.copyWith(
+            queryHistory: _appendQueryHistory(
+              updated.queryHistory,
+              _buildQueryHistoryEntry(
+                updated,
+                outcome: QueryHistoryOutcome.failed,
+                errorMessage: failure.message,
+                rowsLoaded: updated.resultRows.length,
+                rowsAffected: updated.rowsAffected,
+                elapsed: updated.elapsed,
+              ),
+            ),
+          );
+        }, notify: false);
       }
     } finally {
       _safeNotify();
@@ -454,10 +533,13 @@ class WorkspaceController extends ChangeNotifier {
         return;
       }
 
-      _mutateTab(
-        resolvedTabId,
-        (current) => current.copyWith(
-          phase: page.done ? QueryPhase.completed : QueryPhase.running,
+      _mutateTab(resolvedTabId, (current) {
+        final rowCount = current.resultRows.length + page.rows.length;
+        final statusMessage = page.done
+            ? 'Loaded $rowCount total rows.'
+            : 'Loaded $rowCount rows so far.';
+        final updated = current.copyWith(
+          phase: QueryPhase.completed,
           resultRows: <Map<String, Object?>>[
             ...current.resultRows,
             ...page.rows,
@@ -465,28 +547,62 @@ class WorkspaceController extends ChangeNotifier {
           cursorId: page.cursorId,
           hasMoreRows: !page.done,
           elapsed: (current.elapsed ?? Duration.zero) + page.elapsed,
-          statusMessage: page.done
-              ? 'Loaded ${current.resultRows.length + page.rows.length} total rows.'
-              : 'Loaded ${current.resultRows.length + page.rows.length} rows so far.',
-        ),
-        notify: false,
-      );
+          statusMessage: statusMessage,
+          messageHistory: _appendMessage(
+            current.messageHistory,
+            QueryMessageLevel.info,
+            statusMessage,
+          ),
+        );
+        if (!page.done) {
+          return updated;
+        }
+        return updated.copyWith(
+          queryHistory: _appendQueryHistory(
+            updated.queryHistory,
+            _buildQueryHistoryEntry(
+              updated,
+              outcome: QueryHistoryOutcome.completed,
+              rowsLoaded: updated.resultRows.length,
+              rowsAffected: updated.rowsAffected,
+              elapsed: updated.elapsed,
+            ),
+          ),
+        );
+      }, notify: false);
     } catch (error) {
       if (_isCurrentGeneration(resolvedTabId, generation)) {
-        _mutateTab(
-          resolvedTabId,
-          (current) => current.copyWith(
+        _mutateTab(resolvedTabId, (current) {
+          final failure = QueryErrorDetails.fromError(
+            error,
+            stage: QueryErrorStage.paging,
+          );
+          final updated = current.copyWith(
             phase: QueryPhase.failed,
-            error: QueryErrorDetails.fromError(
-              error,
-              stage: QueryErrorStage.paging,
-            ),
+            error: failure,
             statusMessage: null,
             cursorId: null,
             hasMoreRows: false,
-          ),
-          notify: false,
-        );
+            messageHistory: _appendMessage(
+              current.messageHistory,
+              QueryMessageLevel.error,
+              '${failure.stageLabel}: ${failure.message}',
+            ),
+          );
+          return updated.copyWith(
+            queryHistory: _appendQueryHistory(
+              updated.queryHistory,
+              _buildQueryHistoryEntry(
+                updated,
+                outcome: QueryHistoryOutcome.failed,
+                errorMessage: failure.message,
+                rowsLoaded: updated.resultRows.length,
+                rowsAffected: updated.rowsAffected,
+                elapsed: updated.elapsed,
+              ),
+            ),
+          );
+        }, notify: false);
       }
     } finally {
       _safeNotify();
@@ -523,18 +639,35 @@ class WorkspaceController extends ChangeNotifier {
         await _gateway.cancelQuery(cursorId);
       } catch (error) {
         if (_isCurrentGeneration(tabId, generation)) {
-          _mutateTab(
-            tabId,
-            (current) => current.copyWith(
+          _mutateTab(tabId, (current) {
+            final failure = QueryErrorDetails.fromError(
+              error,
+              stage: QueryErrorStage.cancellation,
+            );
+            final updated = current.copyWith(
               phase: QueryPhase.failed,
-              error: QueryErrorDetails.fromError(
-                error,
-                stage: QueryErrorStage.cancellation,
-              ),
+              error: failure,
               statusMessage: null,
-            ),
-            notify: false,
-          );
+              messageHistory: _appendMessage(
+                current.messageHistory,
+                QueryMessageLevel.error,
+                '${failure.stageLabel}: ${failure.message}',
+              ),
+            );
+            return updated.copyWith(
+              queryHistory: _appendQueryHistory(
+                updated.queryHistory,
+                _buildQueryHistoryEntry(
+                  updated,
+                  outcome: QueryHistoryOutcome.failed,
+                  errorMessage: failure.message,
+                  rowsLoaded: updated.resultRows.length,
+                  rowsAffected: updated.rowsAffected,
+                  elapsed: updated.elapsed,
+                ),
+              ),
+            );
+          }, notify: false);
           _safeNotify();
         }
         return;
@@ -542,19 +675,35 @@ class WorkspaceController extends ChangeNotifier {
     }
 
     if (_isCurrentGeneration(tabId, generation)) {
-      _mutateTab(
-        tabId,
-        (current) => current.copyWith(
+      _mutateTab(tabId, (current) {
+        final statusMessage = hasPartialRows
+            ? 'Query cancelled. Partial results remain visible.'
+            : 'Query cancelled before a complete page was loaded.';
+        final updated = current.copyWith(
           phase: QueryPhase.cancelled,
           error: null,
-          statusMessage: hasPartialRows
-              ? 'Query cancelled. Partial results remain visible.'
-              : 'Query cancelled before a complete page was loaded.',
+          statusMessage: statusMessage,
           isResultPartial: hasPartialRows,
           hasMoreRows: false,
-        ),
-        notify: false,
-      );
+          messageHistory: _appendMessage(
+            current.messageHistory,
+            QueryMessageLevel.warning,
+            statusMessage,
+          ),
+        );
+        return updated.copyWith(
+          queryHistory: _appendQueryHistory(
+            updated.queryHistory,
+            _buildQueryHistoryEntry(
+              updated,
+              outcome: QueryHistoryOutcome.cancelled,
+              rowsLoaded: updated.resultRows.length,
+              rowsAffected: updated.rowsAffected,
+              elapsed: updated.elapsed,
+            ),
+          ),
+        );
+      }, notify: false);
       _safeNotify();
     }
   }
@@ -597,6 +746,11 @@ class WorkspaceController extends ChangeNotifier {
         isExporting: true,
         error: null,
         statusMessage: 'Exporting CSV...',
+        messageHistory: _appendMessage(
+          current.messageHistory,
+          QueryMessageLevel.info,
+          'Exporting CSV...',
+        ),
       ),
       notify: false,
     );
@@ -611,27 +765,36 @@ class WorkspaceController extends ChangeNotifier {
         delimiter: config.csvDelimiter,
         includeHeaders: config.csvIncludeHeaders,
       );
-      _mutateTab(
-        tabId,
-        (current) => current.copyWith(
+      _mutateTab(tabId, (current) {
+        final statusMessage =
+            'Exported ${result.rowCount} rows to ${result.path}.';
+        return current.copyWith(
           isExporting: false,
-          statusMessage: 'Exported ${result.rowCount} rows to ${result.path}.',
-        ),
-        notify: false,
-      );
-    } catch (error) {
-      _mutateTab(
-        tabId,
-        (current) => current.copyWith(
-          isExporting: false,
-          error: QueryErrorDetails.fromError(
-            error,
-            stage: QueryErrorStage.export,
+          statusMessage: statusMessage,
+          messageHistory: _appendMessage(
+            current.messageHistory,
+            QueryMessageLevel.info,
+            statusMessage,
           ),
+        );
+      }, notify: false);
+    } catch (error) {
+      _mutateTab(tabId, (current) {
+        final failure = QueryErrorDetails.fromError(
+          error,
+          stage: QueryErrorStage.export,
+        );
+        return current.copyWith(
+          isExporting: false,
+          error: failure,
           statusMessage: null,
-        ),
-        notify: false,
-      );
+          messageHistory: _appendMessage(
+            current.messageHistory,
+            QueryMessageLevel.error,
+            '${failure.stageLabel}: ${failure.message}',
+          ),
+        );
+      }, notify: false);
     } finally {
       _safeNotify();
     }
@@ -1977,8 +2140,59 @@ class WorkspaceController extends ChangeNotifier {
       rowsAffected: page.rowsAffected,
       elapsed: page.elapsed,
       hasMoreRows: !page.done,
-      phase: page.done ? QueryPhase.completed : QueryPhase.running,
+      phase: QueryPhase.completed,
       statusMessage: statusMessage,
+    );
+  }
+
+  List<QueryMessageEntry> _appendMessage(
+    List<QueryMessageEntry> history,
+    QueryMessageLevel level,
+    String message, {
+    DateTime? timestamp,
+  }) {
+    final updated = <QueryMessageEntry>[
+      ...history,
+      QueryMessageEntry(
+        level: level,
+        message: message,
+        timestamp: timestamp ?? DateTime.now(),
+      ),
+    ];
+    if (updated.length <= _maxMessageHistoryEntries) {
+      return updated;
+    }
+    return updated.sublist(updated.length - _maxMessageHistoryEntries);
+  }
+
+  List<QueryHistoryEntry> _appendQueryHistory(
+    List<QueryHistoryEntry> history,
+    QueryHistoryEntry entry,
+  ) {
+    final updated = <QueryHistoryEntry>[...history, entry];
+    if (updated.length <= _maxQueryHistoryEntries) {
+      return updated;
+    }
+    return updated.sublist(updated.length - _maxQueryHistoryEntries);
+  }
+
+  QueryHistoryEntry _buildQueryHistoryEntry(
+    QueryTabState tab, {
+    required QueryHistoryOutcome outcome,
+    String? errorMessage,
+    int? rowsLoaded,
+    int? rowsAffected,
+    Duration? elapsed,
+  }) {
+    return QueryHistoryEntry(
+      sql: tab.lastSql ?? tab.sql,
+      parameterJson: tab.lastParameterJson ?? tab.parameterJson,
+      ranAt: tab.lastRunStartedAt ?? DateTime.now(),
+      outcome: outcome,
+      elapsed: elapsed ?? Duration.zero,
+      rowsLoaded: rowsLoaded,
+      rowsAffected: rowsAffected,
+      errorMessage: errorMessage,
     );
   }
 
@@ -2038,6 +2252,11 @@ class WorkspaceController extends ChangeNotifier {
         phase: QueryPhase.failed,
         error: error,
         statusMessage: null,
+        messageHistory: _appendMessage(
+          current.messageHistory,
+          QueryMessageLevel.error,
+          '${error.stageLabel}: ${error.message}',
+        ),
       ),
       notify: false,
     );
@@ -2224,6 +2443,9 @@ class WorkspaceController extends ChangeNotifier {
           exportPath: draft.exportPath.isEmpty
               ? _suggestExportPathForTitle(draft.title)
               : draft.exportPath,
+        ).copyWith(
+          messageHistory: draft.messageHistory,
+          queryHistory: draft.queryHistory,
         ),
     ];
     tabs = restoredTabs;
@@ -2303,6 +2525,8 @@ class WorkspaceController extends ChangeNotifier {
             exportPath: tab.exportPath.trim().isEmpty
                 ? suggestExportPath(tab.id)
                 : tab.exportPath,
+            messageHistory: tab.messageHistory,
+            queryHistory: tab.queryHistory,
           ),
       ],
     );

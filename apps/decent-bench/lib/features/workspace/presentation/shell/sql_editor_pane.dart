@@ -14,9 +14,16 @@ class SqlEditorPane extends StatelessWidget {
     required this.paramsController,
     required this.editorScrollController,
     required this.focusNode,
+    required this.paramsFocusNode,
+    required this.undoController,
+    required this.paramsUndoController,
     required this.autocompleteResult,
     required this.snippets,
     required this.zoomFactor,
+    required this.showFindBar,
+    required this.findController,
+    required this.findFocusNode,
+    required this.findStatusLabel,
     required this.onSqlChanged,
     required this.onParamsChanged,
     required this.onSelectTab,
@@ -30,6 +37,10 @@ class SqlEditorPane extends StatelessWidget {
     required this.onApplyAutocomplete,
     required this.canRun,
     required this.canStop,
+    required this.onFindChanged,
+    required this.onFindNext,
+    required this.onFindPrevious,
+    required this.onCloseFind,
   });
 
   final List<QueryTabState> tabs;
@@ -38,9 +49,16 @@ class SqlEditorPane extends StatelessWidget {
   final TextEditingController paramsController;
   final ScrollController editorScrollController;
   final FocusNode focusNode;
+  final FocusNode paramsFocusNode;
+  final UndoHistoryController undoController;
+  final UndoHistoryController paramsUndoController;
   final AutocompleteResult autocompleteResult;
   final List<SqlSnippet> snippets;
   final double zoomFactor;
+  final bool showFindBar;
+  final TextEditingController findController;
+  final FocusNode findFocusNode;
+  final String findStatusLabel;
   final ValueChanged<String> onSqlChanged;
   final ValueChanged<String> onParamsChanged;
   final ValueChanged<String> onSelectTab;
@@ -54,6 +72,10 @@ class SqlEditorPane extends StatelessWidget {
   final ValueChanged<AutocompleteSuggestion> onApplyAutocomplete;
   final bool canRun;
   final bool canStop;
+  final ValueChanged<String> onFindChanged;
+  final VoidCallback onFindNext;
+  final VoidCallback onFindPrevious;
+  final VoidCallback onCloseFind;
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +113,16 @@ class SqlEditorPane extends StatelessWidget {
             onSelectTab: onSelectTab,
             onCloseTab: onCloseTab,
           ),
+          if (showFindBar)
+            _FindBar(
+              controller: findController,
+              focusNode: findFocusNode,
+              statusLabel: findStatusLabel,
+              onChanged: onFindChanged,
+              onFindNext: onFindNext,
+              onFindPrevious: onFindPrevious,
+              onClose: onCloseFind,
+            ),
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
             decoration: BoxDecoration(
@@ -101,7 +133,9 @@ class SqlEditorPane extends StatelessWidget {
               ),
             ),
             child: TextField(
+              focusNode: paramsFocusNode,
               controller: paramsController,
+              undoController: paramsUndoController,
               onChanged: onParamsChanged,
               style: TextStyle(fontSize: 12 * zoomFactor),
               decoration: const InputDecoration(
@@ -133,6 +167,7 @@ class SqlEditorPane extends StatelessWidget {
                       focusNode: focusNode,
                       controller: sqlController,
                       scrollController: editorScrollController,
+                      undoController: undoController,
                       onChanged: onSqlChanged,
                       expands: true,
                       maxLines: null,
@@ -189,6 +224,85 @@ class SqlEditorPane extends StatelessWidget {
       return 1;
     }
     return '\n'.allMatches(text).length + 1;
+  }
+}
+
+class _FindBar extends StatelessWidget {
+  const _FindBar({
+    required this.controller,
+    required this.focusNode,
+    required this.statusLabel,
+    required this.onChanged,
+    required this.onFindNext,
+    required this.onFindPrevious,
+    required this.onClose,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String statusLabel;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onFindNext;
+  final VoidCallback onFindPrevious;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.search_outlined, size: 18),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 240,
+            child: TextField(
+              focusNode: focusNode,
+              controller: controller,
+              onChanged: onChanged,
+              onSubmitted: (_) => onFindNext(),
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Find in editor',
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: onFindPrevious,
+            icon: const Icon(Icons.keyboard_arrow_up, size: 16),
+            label: const Text('Prev'),
+          ),
+          const SizedBox(width: 6),
+          OutlinedButton.icon(
+            onPressed: onFindNext,
+            icon: const Icon(Icons.keyboard_arrow_down, size: 16),
+            label: const Text('Next'),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            statusLabel,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Close find',
+            onPressed: onClose,
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ],
+      ),
+    );
   }
 }
 

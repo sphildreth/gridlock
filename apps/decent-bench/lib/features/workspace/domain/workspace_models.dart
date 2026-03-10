@@ -14,6 +14,10 @@ enum QueryPhase {
 
 enum QueryErrorStage { validation, opening, paging, cancellation, export }
 
+enum QueryMessageLevel { info, warning, error }
+
+enum QueryHistoryOutcome { completed, failed, cancelled }
+
 enum SchemaObjectKind { table, view }
 
 class BridgeFailure implements Exception {
@@ -349,6 +353,93 @@ class CsvExportResult {
   }
 }
 
+class QueryMessageEntry {
+  const QueryMessageEntry({
+    required this.level,
+    required this.message,
+    required this.timestamp,
+  });
+
+  final QueryMessageLevel level;
+  final String message;
+  final DateTime timestamp;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'level': level.name,
+      'message': message,
+      'timestamp': timestamp.toIso8601String(),
+    };
+  }
+
+  factory QueryMessageEntry.fromJson(Map<String, Object?> map) {
+    return QueryMessageEntry(
+      level: switch (map['level'] as String? ?? 'info') {
+        'warning' => QueryMessageLevel.warning,
+        'error' => QueryMessageLevel.error,
+        _ => QueryMessageLevel.info,
+      },
+      message: map['message'] as String? ?? '',
+      timestamp: DateTime.parse(
+        map['timestamp'] as String? ??
+            DateTime.fromMillisecondsSinceEpoch(0).toIso8601String(),
+      ),
+    );
+  }
+}
+
+class QueryHistoryEntry {
+  const QueryHistoryEntry({
+    required this.sql,
+    required this.parameterJson,
+    required this.ranAt,
+    required this.outcome,
+    required this.elapsed,
+    required this.rowsLoaded,
+    required this.rowsAffected,
+    this.errorMessage,
+  });
+
+  final String sql;
+  final String parameterJson;
+  final DateTime ranAt;
+  final QueryHistoryOutcome outcome;
+  final Duration elapsed;
+  final int? rowsLoaded;
+  final int? rowsAffected;
+  final String? errorMessage;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'sql': sql,
+      'parameterJson': parameterJson,
+      'ranAt': ranAt.toIso8601String(),
+      'outcome': outcome.name,
+      'elapsedMs': elapsed.inMilliseconds,
+      'rowsLoaded': rowsLoaded,
+      'rowsAffected': rowsAffected,
+      'errorMessage': errorMessage,
+    };
+  }
+
+  factory QueryHistoryEntry.fromJson(Map<String, Object?> map) {
+    return QueryHistoryEntry(
+      sql: map['sql']! as String,
+      parameterJson: map['parameterJson'] as String? ?? '',
+      ranAt: DateTime.parse(map['ranAt']! as String),
+      outcome: switch (map['outcome'] as String? ?? 'completed') {
+        'failed' => QueryHistoryOutcome.failed,
+        'cancelled' => QueryHistoryOutcome.cancelled,
+        _ => QueryHistoryOutcome.completed,
+      },
+      elapsed: Duration(milliseconds: map['elapsedMs'] as int? ?? 0),
+      rowsLoaded: map['rowsLoaded'] as int?,
+      rowsAffected: map['rowsAffected'] as int?,
+      errorMessage: map['errorMessage'] as String?,
+    );
+  }
+}
+
 class QueryTabState {
   const QueryTabState({
     required this.id,
@@ -363,13 +454,17 @@ class QueryTabState {
     required this.error,
     required this.statusMessage,
     required this.lastSql,
+    required this.lastParameterJson,
     required this.lastParams,
+    required this.lastRunStartedAt,
     required this.rowsAffected,
     required this.elapsed,
     required this.hasMoreRows,
     required this.isExporting,
     required this.isResultPartial,
     required this.executionGeneration,
+    required this.messageHistory,
+    required this.queryHistory,
   });
 
   static const Object _unset = Object();
@@ -386,13 +481,17 @@ class QueryTabState {
   final QueryErrorDetails? error;
   final String? statusMessage;
   final String? lastSql;
+  final String? lastParameterJson;
   final List<Object?> lastParams;
+  final DateTime? lastRunStartedAt;
   final int? rowsAffected;
   final Duration? elapsed;
   final bool hasMoreRows;
   final bool isExporting;
   final bool isResultPartial;
   final int executionGeneration;
+  final List<QueryMessageEntry> messageHistory;
+  final List<QueryHistoryEntry> queryHistory;
 
   factory QueryTabState.initial({
     required String id,
@@ -414,13 +513,17 @@ class QueryTabState {
       error: null,
       statusMessage: null,
       lastSql: null,
+      lastParameterJson: null,
       lastParams: const <Object?>[],
+      lastRunStartedAt: null,
       rowsAffected: null,
       elapsed: null,
       hasMoreRows: false,
       isExporting: false,
       isResultPartial: false,
       executionGeneration: 0,
+      messageHistory: const <QueryMessageEntry>[],
+      queryHistory: const <QueryHistoryEntry>[],
     );
   }
 
@@ -448,13 +551,17 @@ class QueryTabState {
     Object? error = _unset,
     Object? statusMessage = _unset,
     Object? lastSql = _unset,
+    Object? lastParameterJson = _unset,
     List<Object?>? lastParams,
+    Object? lastRunStartedAt = _unset,
     Object? rowsAffected = _unset,
     Object? elapsed = _unset,
     bool? hasMoreRows,
     bool? isExporting,
     bool? isResultPartial,
     int? executionGeneration,
+    List<QueryMessageEntry>? messageHistory,
+    List<QueryHistoryEntry>? queryHistory,
   }) {
     return QueryTabState(
       id: id ?? this.id,
@@ -471,7 +578,13 @@ class QueryTabState {
           ? this.statusMessage
           : statusMessage as String?,
       lastSql: lastSql == _unset ? this.lastSql : lastSql as String?,
+      lastParameterJson: lastParameterJson == _unset
+          ? this.lastParameterJson
+          : lastParameterJson as String?,
       lastParams: lastParams ?? this.lastParams,
+      lastRunStartedAt: lastRunStartedAt == _unset
+          ? this.lastRunStartedAt
+          : lastRunStartedAt as DateTime?,
       rowsAffected: rowsAffected == _unset
           ? this.rowsAffected
           : rowsAffected as int?,
@@ -480,6 +593,8 @@ class QueryTabState {
       isExporting: isExporting ?? this.isExporting,
       isResultPartial: isResultPartial ?? this.isResultPartial,
       executionGeneration: executionGeneration ?? this.executionGeneration,
+      messageHistory: messageHistory ?? this.messageHistory,
+      queryHistory: queryHistory ?? this.queryHistory,
     );
   }
 }

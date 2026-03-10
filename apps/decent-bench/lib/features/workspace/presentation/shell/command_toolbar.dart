@@ -10,6 +10,8 @@ class CommandToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
+      alignment: Alignment.centerLeft,
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
@@ -20,23 +22,27 @@ class CommandToolbar extends StatelessWidget {
           ),
         ),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: <Widget>[
-            _toolbarButton('file_new'),
-            _toolbarButton('file_open'),
-            _toolbarButton('import_excel'),
-            _toolbarButton('import_sqlite'),
-            _toolbarButton('import_sql_dump'),
-            _divider(context),
-            _toolbarButton('tools_new_query_tab'),
-            _toolbarButton('tools_run_query'),
-            _toolbarButton('tools_stop_query'),
-            _toolbarButton('tools_format_sql'),
-            _divider(context),
-            _toolbarButton('export_results_csv'),
-          ],
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _toolbarButton('file_new'),
+              _toolbarButton('file_open'),
+              _toolbarButton('import_excel'),
+              _toolbarButton('import_sqlite'),
+              _toolbarButton('import_sql_dump'),
+              _divider(context),
+              _toolbarButton('tools_new_query_tab'),
+              _toolbarButton('tools_run_query'),
+              _toolbarButton('tools_stop_query'),
+              _toolbarButton('tools_format_sql'),
+              _divider(context),
+              _toolbarButton('export_results_csv'),
+            ],
+          ),
         ),
       ),
     );
