@@ -2458,6 +2458,9 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   String? _validateAppConfig(AppConfig next) {
+    if (next.appearance.activeTheme.trim().isEmpty) {
+      return 'Active theme cannot be empty.';
+    }
     if (next.defaultPageSize <= 0) {
       return 'Page size must be a positive integer.';
     }

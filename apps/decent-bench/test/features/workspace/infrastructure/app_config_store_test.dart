@@ -8,6 +8,10 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('AppConfig round-trips editor settings and snippets to TOML', () {
     final config = AppConfig.defaults().copyWith(
+      appearance: const AppearanceSettings(
+        activeTheme: 'classic-light',
+        themesDir: '/tmp/themes',
+      ),
       recentFiles: const <String>['/tmp/a.ddb', '/tmp/b.ddb'],
       defaultPageSize: 250,
       csvDelimiter: ';',
@@ -48,10 +52,14 @@ void main() {
     final parsed = AppConfig.fromToml(toml);
 
     expect(toml, contains('editor_snippet_count = 1'));
+    expect(toml, contains('[appearance]'));
+    expect(toml, contains('active_theme = "classic-light"'));
     expect(toml, contains('[layout]'));
     expect(toml, contains('[shortcuts]'));
     expect(toml, contains('[[editor_snippets]]'));
     expect(parsed.configVersion, AppConfig.currentConfigVersion);
+    expect(parsed.appearance.activeTheme, 'classic-light');
+    expect(parsed.appearance.themesDir, '/tmp/themes');
     expect(parsed.recentFiles, config.recentFiles);
     expect(parsed.defaultPageSize, 250);
     expect(parsed.csvDelimiter, ';');
@@ -89,6 +97,10 @@ recent_files = ["/tmp/example.ddb"]
     final parsed = AppConfig.fromToml(legacyToml);
 
     expect(parsed.configVersion, AppConfig.currentConfigVersion);
+    expect(
+      parsed.appearance.activeTheme,
+      AppearanceSettings.defaultActiveTheme,
+    );
     expect(parsed.defaultPageSize, 500);
     expect(parsed.editorSettings.autocompleteEnabled, isTrue);
     expect(parsed.shellPreferences, isNotNull);

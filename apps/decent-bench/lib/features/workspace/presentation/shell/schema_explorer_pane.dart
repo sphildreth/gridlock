@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../domain/workspace_models.dart';
 import 'shell_pane_frame.dart';
 
@@ -57,127 +58,132 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
       padding: EdgeInsets.zero,
       child: widget.isLoading
           ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-          : ListView(
-              padding: const EdgeInsets.all(8),
-              children: <Widget>[
-                _RootNode(
-                  label: databaseLabel,
-                  selected: widget.selectedNodeId == 'database',
-                  onTap: () => widget.onSelectNode('database'),
-                ),
-                const SizedBox(height: 8),
-                _SectionBranch(
-                  nodeId: 'section:tables',
-                  title: 'Tables',
-                  count: schema.tables.isEmpty
-                      ? _sampleTables.length
-                      : schema.tables.length,
-                  icon: Icons.table_chart_outlined,
-                  selected: widget.selectedNodeId == 'section:tables',
-                  expanded: _expandedNodes.contains('section:tables'),
-                  onSelected: widget.onSelectNode,
-                  onShowContextMenu: widget.onShowNodeMenu,
-                  onExpansionChanged: _setExpanded,
-                  children: schema.tables.isEmpty
-                      ? _buildSampleTableNodes()
-                      : <Widget>[
-                          for (final object in schema.tables)
-                            _ObjectBranch(
-                              nodeId: 'table:${object.name}',
-                              label: object.name,
-                              icon: Icons.table_rows_outlined,
-                              selectedNodeId: widget.selectedNodeId,
-                              expandedNodes: _expandedNodes,
-                              onSelectNode: widget.onSelectNode,
-                              onShowContextMenu: widget.onShowNodeMenu,
-                              onExpansionChanged: _setExpanded,
-                              children: _buildObjectChildren(
-                                object: object,
-                                relatedIndexes: schema.indexesForObject(
-                                  object.name,
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                color: context.decentBenchTheme.sidebar.background,
+              ),
+              child: ListView(
+                padding: const EdgeInsets.all(8),
+                children: <Widget>[
+                  _RootNode(
+                    label: databaseLabel,
+                    selected: widget.selectedNodeId == 'database',
+                    onTap: () => widget.onSelectNode('database'),
+                  ),
+                  const SizedBox(height: 8),
+                  _SectionBranch(
+                    nodeId: 'section:tables',
+                    title: 'Tables',
+                    count: schema.tables.isEmpty
+                        ? _sampleTables.length
+                        : schema.tables.length,
+                    icon: Icons.table_chart_outlined,
+                    selected: widget.selectedNodeId == 'section:tables',
+                    expanded: _expandedNodes.contains('section:tables'),
+                    onSelected: widget.onSelectNode,
+                    onShowContextMenu: widget.onShowNodeMenu,
+                    onExpansionChanged: _setExpanded,
+                    children: schema.tables.isEmpty
+                        ? _buildSampleTableNodes()
+                        : <Widget>[
+                            for (final object in schema.tables)
+                              _ObjectBranch(
+                                nodeId: 'table:${object.name}',
+                                label: object.name,
+                                icon: Icons.table_rows_outlined,
+                                selectedNodeId: widget.selectedNodeId,
+                                expandedNodes: _expandedNodes,
+                                onSelectNode: widget.onSelectNode,
+                                onShowContextMenu: widget.onShowNodeMenu,
+                                onExpansionChanged: _setExpanded,
+                                children: _buildObjectChildren(
+                                  object: object,
+                                  relatedIndexes: schema.indexesForObject(
+                                    object.name,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
-                ),
-                const SizedBox(height: 8),
-                _SectionBranch(
-                  nodeId: 'section:views',
-                  title: 'Views',
-                  count: schema.views.isEmpty
-                      ? _sampleViews.length
-                      : schema.views.length,
-                  icon: Icons.visibility_outlined,
-                  selected: widget.selectedNodeId == 'section:views',
-                  expanded: _expandedNodes.contains('section:views'),
-                  onSelected: widget.onSelectNode,
-                  onShowContextMenu: widget.onShowNodeMenu,
-                  onExpansionChanged: _setExpanded,
-                  children: schema.views.isEmpty
-                      ? _buildSampleViewNodes()
-                      : <Widget>[
-                          for (final object in schema.views)
-                            _ObjectBranch(
-                              nodeId: 'view:${object.name}',
-                              label: object.name,
-                              icon: Icons.view_sidebar_outlined,
-                              selectedNodeId: widget.selectedNodeId,
-                              expandedNodes: _expandedNodes,
-                              onSelectNode: widget.onSelectNode,
-                              onShowContextMenu: widget.onShowNodeMenu,
-                              onExpansionChanged: _setExpanded,
-                              children: _buildObjectChildren(
-                                object: object,
-                                relatedIndexes: schema.indexesForObject(
-                                  object.name,
+                          ],
+                  ),
+                  const SizedBox(height: 8),
+                  _SectionBranch(
+                    nodeId: 'section:views',
+                    title: 'Views',
+                    count: schema.views.isEmpty
+                        ? _sampleViews.length
+                        : schema.views.length,
+                    icon: Icons.visibility_outlined,
+                    selected: widget.selectedNodeId == 'section:views',
+                    expanded: _expandedNodes.contains('section:views'),
+                    onSelected: widget.onSelectNode,
+                    onShowContextMenu: widget.onShowNodeMenu,
+                    onExpansionChanged: _setExpanded,
+                    children: schema.views.isEmpty
+                        ? _buildSampleViewNodes()
+                        : <Widget>[
+                            for (final object in schema.views)
+                              _ObjectBranch(
+                                nodeId: 'view:${object.name}',
+                                label: object.name,
+                                icon: Icons.view_sidebar_outlined,
+                                selectedNodeId: widget.selectedNodeId,
+                                expandedNodes: _expandedNodes,
+                                onSelectNode: widget.onSelectNode,
+                                onShowContextMenu: widget.onShowNodeMenu,
+                                onExpansionChanged: _setExpanded,
+                                children: _buildObjectChildren(
+                                  object: object,
+                                  relatedIndexes: schema.indexesForObject(
+                                    object.name,
+                                  ),
+                                  includeConstraints: false,
+                                  includeTriggers: false,
                                 ),
-                                includeConstraints: false,
-                                includeTriggers: false,
                               ),
-                            ),
-                        ],
-                ),
-                const SizedBox(height: 8),
-                _SectionBranch(
-                  nodeId: 'section:indexes',
-                  title: 'Indexes',
-                  count: schema.indexes.isEmpty
-                      ? _sampleIndexLabels.length
-                      : schema.indexes.length,
-                  icon: Icons.filter_alt_outlined,
-                  selected: widget.selectedNodeId == 'section:indexes',
-                  expanded: _expandedNodes.contains('section:indexes'),
-                  onSelected: widget.onSelectNode,
-                  onShowContextMenu: widget.onShowNodeMenu,
-                  onExpansionChanged: _setExpanded,
-                  children: schema.indexes.isEmpty
-                      ? <Widget>[
-                          for (final label in _sampleIndexLabels)
-                            _LeafNode(
-                              nodeId: 'index:sample:$label',
-                              icon: Icons.label_outline,
-                              label: label,
-                              selected:
-                                  widget.selectedNodeId ==
-                                  'index:sample:$label',
-                              onTap: widget.onSelectNode,
-                            ),
-                        ]
-                      : <Widget>[
-                          for (final index in schema.indexes)
-                            _LeafNode(
-                              nodeId: 'index:${index.name}',
-                              icon: Icons.label_outline,
-                              label:
-                                  '${index.name} (${index.columns.join(", ")})',
-                              selected:
-                                  widget.selectedNodeId ==
-                                  'index:${index.name}',
-                              onTap: widget.onSelectNode,
-                            ),
-                        ],
-                ),
-              ],
+                          ],
+                  ),
+                  const SizedBox(height: 8),
+                  _SectionBranch(
+                    nodeId: 'section:indexes',
+                    title: 'Indexes',
+                    count: schema.indexes.isEmpty
+                        ? _sampleIndexLabels.length
+                        : schema.indexes.length,
+                    icon: Icons.filter_alt_outlined,
+                    selected: widget.selectedNodeId == 'section:indexes',
+                    expanded: _expandedNodes.contains('section:indexes'),
+                    onSelected: widget.onSelectNode,
+                    onShowContextMenu: widget.onShowNodeMenu,
+                    onExpansionChanged: _setExpanded,
+                    children: schema.indexes.isEmpty
+                        ? <Widget>[
+                            for (final label in _sampleIndexLabels)
+                              _LeafNode(
+                                nodeId: 'index:sample:$label',
+                                icon: Icons.label_outline,
+                                label: label,
+                                selected:
+                                    widget.selectedNodeId ==
+                                    'index:sample:$label',
+                                onTap: widget.onSelectNode,
+                              ),
+                          ]
+                        : <Widget>[
+                            for (final index in schema.indexes)
+                              _LeafNode(
+                                nodeId: 'index:${index.name}',
+                                icon: Icons.label_outline,
+                                label:
+                                    '${index.name} (${index.columns.join(", ")})',
+                                selected:
+                                    widget.selectedNodeId ==
+                                    'index:${index.name}',
+                                onTap: widget.onSelectNode,
+                              ),
+                          ],
+                  ),
+                ],
+              ),
             ),
     );
   }
@@ -474,19 +480,27 @@ class _RootNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        color: selected ? theme.colorScheme.secondaryContainer : null,
+        color: selected ? tokens.sidebar.itemSelectedBackground : null,
         child: Row(
           children: <Widget>[
-            const Icon(Icons.storage_outlined, size: 18),
+            Icon(
+              Icons.storage_outlined,
+              size: tokens.metrics.iconSize + 2,
+              color: tokens.sidebar.itemText,
+            ),
             const SizedBox(width: 8),
             Text(
               label,
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w700,
+                color: selected
+                    ? tokens.sidebar.itemSelectedText
+                    : tokens.sidebar.itemText,
               ),
             ),
           ],
@@ -524,17 +538,22 @@ class _SectionBranch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        color: theme.colorScheme.surfaceContainerLowest,
+        border: Border.all(color: tokens.colors.border),
+        color: tokens.sidebar.headerBackground,
       ),
       child: ExpansionTile(
         key: PageStorageKey<String>(nodeId),
         initiallyExpanded: expanded,
         tilePadding: const EdgeInsets.symmetric(horizontal: 8),
         childrenPadding: const EdgeInsets.only(left: 10, right: 6, bottom: 6),
-        leading: Icon(icon, size: 16),
+        leading: Icon(
+          icon,
+          size: tokens.metrics.iconSize,
+          color: tokens.sidebar.headerText,
+        ),
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => onSelected(nodeId),
@@ -547,6 +566,7 @@ class _SectionBranch extends StatelessWidget {
                   title,
                   style: theme.textTheme.labelLarge?.copyWith(
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: tokens.sidebar.headerText,
                   ),
                 ),
               ),
@@ -669,9 +689,10 @@ class _BranchNode extends StatelessWidget {
   Widget build(BuildContext context) {
     final selected = selectedNodeId == nodeId;
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return Container(
       margin: EdgeInsets.only(left: inset, bottom: 4),
-      color: selected ? theme.colorScheme.secondaryContainer : null,
+      color: selected ? tokens.sidebar.itemSelectedBackground : null,
       child: ExpansionTile(
         key: PageStorageKey<String>(nodeId),
         initiallyExpanded: expandedNodes.contains(nodeId),
@@ -679,7 +700,13 @@ class _BranchNode extends StatelessWidget {
         childrenPadding: const EdgeInsets.only(left: 12, bottom: 4),
         collapsedShape: const RoundedRectangleBorder(),
         shape: const RoundedRectangleBorder(),
-        leading: Icon(icon, size: 16),
+        leading: Icon(
+          icon,
+          size: tokens.metrics.iconSize,
+          color: selected
+              ? tokens.sidebar.itemSelectedText
+              : tokens.sidebar.itemText,
+        ),
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => onSelectNode(nodeId),
@@ -689,6 +716,9 @@ class _BranchNode extends StatelessWidget {
             label,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected
+                  ? tokens.sidebar.itemSelectedText
+                  : tokens.sidebar.itemText,
             ),
           ),
         ),
@@ -719,19 +749,32 @@ class _LeafNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     final child = Container(
-      color: selected ? theme.colorScheme.secondaryContainer : null,
+      color: selected ? tokens.sidebar.itemSelectedBackground : null,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: <Widget>[
-          Icon(icon, size: 14, color: enabled ? null : theme.disabledColor),
+          Icon(
+            icon,
+            size: 14,
+            color: enabled
+                ? (selected
+                      ? tokens.sidebar.itemSelectedText
+                      : tokens.sidebar.itemText)
+                : tokens.colors.textDisabled,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
-                color: enabled ? null : theme.disabledColor,
+                fontFamily: tokens.fonts.editorFamily,
+                color: enabled
+                    ? (selected
+                          ? tokens.sidebar.itemSelectedText
+                          : tokens.sidebar.itemText)
+                    : tokens.colors.textDisabled,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
               ),
             ),
@@ -753,16 +796,20 @@ class _CountBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: tokens.sidebar.background,
+        border: Border.all(color: tokens.sidebar.treeLine),
+        borderRadius: BorderRadius.circular(tokens.metrics.borderRadius),
       ),
       child: Text(
         '$count',
-        style: Theme.of(
-          context,
-        ).textTheme.labelSmall?.copyWith(fontFamily: 'monospace'),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontFamily: tokens.fonts.editorFamily,
+          color: tokens.sidebar.itemText,
+        ),
       ),
     );
   }

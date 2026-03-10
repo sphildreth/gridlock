@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../domain/app_config.dart';
 import '../../domain/sql_autocomplete.dart';
 import '../../domain/workspace_models.dart';
@@ -86,6 +87,7 @@ class SqlEditorPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     final effectiveTabs = tabs.length >= 2
         ? tabs
         : <QueryTabState>[
@@ -132,18 +134,18 @@ class SqlEditorPane extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
-              ),
+              color: tokens.colors.panelBg,
+              border: Border(bottom: BorderSide(color: tokens.colors.border)),
             ),
             child: TextField(
               focusNode: paramsFocusNode,
               controller: paramsController,
               undoController: paramsUndoController,
               onChanged: onParamsChanged,
-              style: TextStyle(fontSize: 12 * zoomFactor),
+              style: TextStyle(
+                fontSize: tokens.fonts.uiSize * zoomFactor,
+                color: tokens.dialog.inputText,
+              ),
               decoration: const InputDecoration(
                 isDense: true,
                 labelText: 'Parameters (JSON array)',
@@ -154,19 +156,18 @@ class SqlEditorPane extends StatelessWidget {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
+                final themeTokens = context.decentBenchTheme;
                 final editorStyle = TextStyle(
-                  fontSize: 13 * zoomFactor,
-                  fontFamily: 'monospace',
-                  height: 1.45,
-                  color: const Color(0xFF111111),
+                  fontSize: themeTokens.fonts.editorSize * zoomFactor,
+                  fontFamily: themeTokens.fonts.editorFamily,
+                  height: themeTokens.fonts.lineHeight,
+                  color: themeTokens.editor.text,
                 );
                 return DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: themeTokens.editor.background,
                     border: Border(
-                      bottom: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                      ),
+                      bottom: BorderSide(color: themeTokens.colors.border),
                     ),
                   ),
                   child: Stack(
@@ -230,17 +231,19 @@ class SqlEditorPane extends StatelessWidget {
                                   minLines: null,
                                   textAlignVertical: TextAlignVertical.top,
                                   style: editorStyle,
-                                  cursorColor: Colors.black,
-                                  decoration: const InputDecoration(
+                                  cursorColor: themeTokens.editor.cursor,
+                                  decoration: InputDecoration(
                                     border: InputBorder.none,
-                                    contentPadding: EdgeInsets.all(16),
+                                    contentPadding: const EdgeInsets.all(16),
                                     hintText:
                                         'SELECT *\nFROM your_table\nLIMIT 100;',
                                     hintStyle: TextStyle(
-                                      color: Color(0xFF666666),
+                                      color: themeTokens.editor.whitespace,
+                                      fontFamily:
+                                          themeTokens.fonts.editorFamily,
                                     ),
                                     filled: true,
-                                    fillColor: Colors.white,
+                                    fillColor: themeTokens.editor.background,
                                   ),
                                 ),
                               ),
@@ -317,19 +320,20 @@ class _FindBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+        color: tokens.editor.currentLineBackground,
+        border: Border(bottom: BorderSide(color: tokens.colors.border)),
       ),
       child: Row(
         children: <Widget>[
-          const Icon(Icons.search_outlined, size: 18),
+          Icon(
+            Icons.search_outlined,
+            size: tokens.metrics.iconSize + 2,
+            color: tokens.editor.tabInactiveText,
+          ),
           const SizedBox(width: 8),
           SizedBox(
             width: 240,
@@ -359,9 +363,10 @@ class _FindBar extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             statusLabel,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontFamily: tokens.fonts.editorFamily,
+              color: tokens.editor.tabInactiveText,
+            ),
           ),
           const Spacer(),
           IconButton(
@@ -398,28 +403,32 @@ class _EditorToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: <Widget>[
         FilledButton.icon(
           onPressed: canRun ? onRunQuery : null,
-          icon: const Icon(Icons.play_arrow_rounded, size: 16),
+          icon: Icon(Icons.play_arrow_rounded, size: tokens.metrics.iconSize),
           label: const Text('Run'),
         ),
         OutlinedButton.icon(
           onPressed: canStop ? onStopQuery : null,
-          icon: const Icon(Icons.stop_rounded, size: 16),
+          icon: Icon(Icons.stop_rounded, size: tokens.metrics.iconSize),
           label: const Text('Stop'),
         ),
         OutlinedButton.icon(
           onPressed: onFormatSql,
-          icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
+          icon: Icon(
+            Icons.auto_fix_high_rounded,
+            size: tokens.metrics.iconSize,
+          ),
           label: const Text('Format'),
         ),
         OutlinedButton.icon(
           onPressed: onNewTab,
-          icon: const Icon(Icons.add_box_outlined, size: 16),
+          icon: Icon(Icons.add_box_outlined, size: tokens.metrics.iconSize),
           label: const Text('New Tab'),
         ),
         PopupMenuButton<SqlSnippet>(
@@ -446,7 +455,10 @@ class _EditorToolbar extends StatelessWidget {
           child: IgnorePointer(
             child: OutlinedButton.icon(
               onPressed: () {},
-              icon: const Icon(Icons.snippet_folder_outlined, size: 16),
+              icon: Icon(
+                Icons.snippet_folder_outlined,
+                size: tokens.metrics.iconSize,
+              ),
               label: const Text('Snippets'),
             ),
           ),
@@ -471,15 +483,12 @@ class _TabStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       height: 38,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+        color: tokens.editor.tabInactiveBackground,
+        border: Border(bottom: BorderSide(color: tokens.colors.border)),
       ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -494,20 +503,34 @@ class _TabStrip extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: isActive
-                    ? Theme.of(context).colorScheme.surface
-                    : Colors.transparent,
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                    ? tokens.editor.tabActiveBackground
+                    : tokens.editor.tabInactiveBackground,
+                border: Border.all(color: tokens.colors.border),
+                borderRadius: BorderRadius.circular(
+                  tokens.metrics.borderRadius,
                 ),
               ),
               child: Row(
                 children: <Widget>[
-                  Text(tab.title),
+                  Text(
+                    tab.title,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: isActive
+                          ? tokens.editor.tabActiveText
+                          : tokens.editor.tabInactiveText,
+                    ),
+                  ),
                   if (!isMock) ...<Widget>[
                     const SizedBox(width: 6),
                     GestureDetector(
                       onTap: () => onCloseTab(tab.id),
-                      child: const Icon(Icons.close, size: 14),
+                      child: Icon(
+                        Icons.close,
+                        size: tokens.metrics.iconSize - 2,
+                        color: isActive
+                            ? tokens.editor.tabActiveText
+                            : tokens.editor.tabInactiveText,
+                      ),
                     ),
                   ],
                 ],
@@ -535,9 +558,10 @@ class _LineNumberGutter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       width: 48,
-      color: const Color(0xFFF0F0F0),
+      color: tokens.editor.gutterBackground,
       child: ClipRect(
         child: AnimatedBuilder(
           animation: controller,
@@ -554,9 +578,9 @@ class _LineNumberGutter extends StatelessWidget {
                         '${index + 1}',
                         textAlign: TextAlign.right,
                         style: TextStyle(
-                          fontSize: 12 * zoomFactor,
-                          fontFamily: 'monospace',
-                          color: const Color(0xFF555555),
+                          fontSize: tokens.fonts.editorSize * zoomFactor - 1,
+                          fontFamily: tokens.fonts.editorFamily,
+                          color: tokens.editor.gutterText,
                         ),
                       ),
                     ),
@@ -595,6 +619,7 @@ class _AutocompletePopup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     final popupWidth = maxWidth < 380 ? maxWidth - 16 : 360.0;
     final popupHeight = (result.suggestions.length.clamp(1, 6) * 40) + 34.0;
     final position = _popupOffset(
@@ -607,13 +632,14 @@ class _AutocompletePopup extends StatelessWidget {
       top: position.dy,
       child: Material(
         elevation: 6,
-        color: Colors.white,
+        color: tokens.editor.background,
         child: Container(
           width: popupWidth,
           constraints: BoxConstraints(maxHeight: popupHeight),
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
+            color: tokens.editor.background,
+            border: Border.all(color: tokens.colors.borderStrong),
+            borderRadius: BorderRadius.circular(tokens.metrics.borderRadius),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -622,10 +648,12 @@ class _AutocompletePopup extends StatelessWidget {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-                color: const Color(0xFFF6F6F6),
+                color: tokens.editor.tabInactiveBackground,
                 child: Text(
                   'Suggestions · Tab to accept',
-                  style: Theme.of(context).textTheme.labelLarge,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: tokens.editor.tabInactiveText,
+                  ),
                 ),
               ),
               Flexible(
@@ -640,15 +668,19 @@ class _AutocompletePopup extends StatelessWidget {
                       onTap: () => onApply(suggestion),
                       child: Container(
                         color: selected
-                            ? const Color(0xFFE7F1FF)
-                            : Colors.white,
+                            ? tokens.colors.selection
+                            : tokens.editor.background,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 8,
                         ),
                         child: Row(
                           children: <Widget>[
-                            Icon(_iconForKind(suggestion.kind), size: 16),
+                            Icon(
+                              _iconForKind(suggestion.kind),
+                              size: tokens.metrics.iconSize,
+                              color: tokens.colors.accent,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
@@ -665,6 +697,7 @@ class _AutocompletePopup extends StatelessWidget {
                                           fontWeight: selected
                                               ? FontWeight.w700
                                               : FontWeight.w500,
+                                          color: tokens.editor.text,
                                         ),
                                   ),
                                   Text(
@@ -673,7 +706,7 @@ class _AutocompletePopup extends StatelessWidget {
                                     overflow: TextOverflow.ellipsis,
                                     style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
-                                          color: const Color(0xFF666666),
+                                          color: tokens.colors.textMuted,
                                         ),
                                   ),
                                 ],
@@ -761,13 +794,20 @@ class _StateChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: tokens.editor.tabInactiveBackground,
+        border: Border.all(color: tokens.colors.border),
+        borderRadius: BorderRadius.circular(tokens.metrics.borderRadius),
       ),
-      child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+      child: Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: tokens.editor.tabInactiveText),
+      ),
     );
   }
 }

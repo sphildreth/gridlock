@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../application/menu_command_registry.dart';
 
 class CommandToolbar extends StatelessWidget {
@@ -9,18 +10,15 @@ class CommandToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       width: double.infinity,
       alignment: Alignment.centerLeft,
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+        color: tokens.toolbar.background,
+        border: Border(bottom: BorderSide(color: tokens.colors.border)),
       ),
       child: Align(
         alignment: Alignment.centerLeft,
@@ -51,7 +49,7 @@ class CommandToolbar extends StatelessWidget {
       width: 1,
       height: 20,
       margin: const EdgeInsets.symmetric(horizontal: 8),
-      color: Theme.of(context).colorScheme.outlineVariant,
+      color: context.decentBenchTheme.colors.border,
     );
   }
 

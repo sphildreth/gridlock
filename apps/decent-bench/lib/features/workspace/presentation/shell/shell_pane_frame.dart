@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
+
 class ShellPaneFrame extends StatelessWidget {
   const ShellPaneFrame({
     super.key,
@@ -23,10 +25,12 @@ class ShellPaneFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        color: tokens.colors.panelBg,
+        border: Border.all(color: tokens.colors.border),
+        borderRadius: BorderRadius.circular(tokens.metrics.borderRadius),
       ),
       child: Column(
         children: <Widget>[
@@ -34,9 +38,10 @@ class ShellPaneFrame extends StatelessWidget {
             height: 52,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              border: Border(
-                bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+              color: tokens.colors.panelAltBg,
+              border: Border(bottom: BorderSide(color: tokens.colors.border)),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(tokens.metrics.borderRadius),
               ),
             ),
             child: Row(
@@ -55,6 +60,7 @@ class ShellPaneFrame extends StatelessWidget {
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                           height: 1.0,
+                          color: tokens.colors.text,
                         ),
                       ),
                       if (subtitle != null)
@@ -64,6 +70,7 @@ class ShellPaneFrame extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
                             height: 1.0,
+                            color: tokens.colors.textMuted,
                           ),
                         ),
                     ],
@@ -81,10 +88,8 @@ class ShellPaneFrame extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLow,
-                border: Border(
-                  bottom: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
+                color: tokens.toolbar.background,
+                border: Border(bottom: BorderSide(color: tokens.colors.border)),
               ),
               child: toolbar,
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../domain/sql_vocabulary.dart';
 
 class SqlHighlightingTextEditingController extends TextEditingController {
@@ -11,14 +12,54 @@ class SqlHighlightingTextEditingController extends TextEditingController {
   static final Set<String> _functionSet = decentDbSqlFunctions
       .map((functionName) => functionName.toLowerCase())
       .toSet();
-
-  static const Color _commentColor = Color(0xFF5F7B4A);
-  static const Color _stringColor = Color(0xFF9E2A2B);
-  static const Color _numberColor = Color(0xFF0F5D75);
-  static const Color _keywordColor = Color(0xFF0B4F8C);
-  static const Color _functionColor = Color(0xFF7A4B10);
-  static const Color _identifierColor = Color(0xFF111111);
-  static const Color _quotedIdentifierColor = Color(0xFF444444);
+  static const Set<String> _constantSet = <String>{
+    'true',
+    'false',
+    'null',
+    'current_timestamp',
+    'current_date',
+    'current_time',
+  };
+  static const Set<String> _typeSet = <String>{
+    'any',
+    'blob',
+    'boolean',
+    'date',
+    'datetime',
+    'decimal',
+    'double',
+    'float',
+    'integer',
+    'int',
+    'numeric',
+    'real',
+    'text',
+    'time',
+    'timestamp',
+    'varchar',
+  };
+  static const Set<String> _operatorChars = <String>{
+    '+',
+    '-',
+    '*',
+    '/',
+    '%',
+    '=',
+    '<',
+    '>',
+    '!',
+    '|',
+    '&',
+    '^',
+    '~',
+    '.',
+    ',',
+    ';',
+    '(',
+    ')',
+    '[',
+    ']',
+  };
 
   @override
   TextSpan buildTextSpan({
@@ -26,9 +67,12 @@ class SqlHighlightingTextEditingController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
+    final theme = context.decentBenchTheme;
     final baseStyle = (style ?? const TextStyle()).copyWith(
-      color: _identifierColor,
-      fontFamily: 'monospace',
+      color: theme.sqlSyntax.identifier,
+      fontFamily: theme.fonts.editorFamily,
+      fontSize: theme.fonts.editorSize,
+      height: theme.fonts.lineHeight,
     );
     final spans = <InlineSpan>[];
     final source = text;
@@ -44,7 +88,7 @@ class SqlHighlightingTextEditingController extends TextEditingController {
         spans.add(
           TextSpan(
             text: source.substring(index, end),
-            style: baseStyle.copyWith(color: _commentColor),
+            style: baseStyle.copyWith(color: theme.sqlSyntax.comment),
           ),
         );
         index = end;
@@ -55,10 +99,13 @@ class SqlHighlightingTextEditingController extends TextEditingController {
           index + 1 < source.length &&
           source[index + 1] == '*') {
         final end = _scanBlockComment(source, index + 2);
+        final isClosed = end < source.length || source.endsWith('*/');
         spans.add(
           TextSpan(
             text: source.substring(index, end),
-            style: baseStyle.copyWith(color: _commentColor),
+            style: baseStyle.copyWith(
+              color: isClosed ? theme.sqlSyntax.comment : theme.sqlSyntax.error,
+            ),
           ),
         );
         index = end;
@@ -66,23 +113,43 @@ class SqlHighlightingTextEditingController extends TextEditingController {
       }
 
       if (current == '\'') {
-        final end = _scanSingleQuotedString(source, index + 1);
+        final scan = _scanSingleQuotedString(source, index + 1);
         spans.add(
           TextSpan(
-            text: source.substring(index, end),
-            style: baseStyle.copyWith(color: _stringColor),
+            text: source.substring(index, scan.end),
+            style: baseStyle.copyWith(
+              color: scan.terminated
+                  ? theme.sqlSyntax.string
+                  : theme.sqlSyntax.error,
+            ),
           ),
         );
-        index = end;
+        index = scan.end;
         continue;
       }
 
       if (current == '"') {
-        final end = _scanDoubleQuotedIdentifier(source, index + 1);
+        final scan = _scanDoubleQuotedIdentifier(source, index + 1);
+        spans.add(
+          TextSpan(
+            text: source.substring(index, scan.end),
+            style: baseStyle.copyWith(
+              color: scan.terminated
+                  ? theme.sqlSyntax.identifier
+                  : theme.sqlSyntax.error,
+            ),
+          ),
+        );
+        index = scan.end;
+        continue;
+      }
+
+      if (_isParameterStart(source, index)) {
+        final end = _scanParameter(source, index + 1);
         spans.add(
           TextSpan(
             text: source.substring(index, end),
-            style: baseStyle.copyWith(color: _quotedIdentifierColor),
+            style: baseStyle.copyWith(color: theme.sqlSyntax.parameter),
           ),
         );
         index = end;
@@ -94,7 +161,7 @@ class SqlHighlightingTextEditingController extends TextEditingController {
         spans.add(
           TextSpan(
             text: source.substring(index, end),
-            style: baseStyle.copyWith(color: _numberColor),
+            style: baseStyle.copyWith(color: theme.sqlSyntax.number),
           ),
         );
         index = end;
@@ -105,18 +172,36 @@ class SqlHighlightingTextEditingController extends TextEditingController {
         final end = _scanIdentifier(source, index + 1);
         final lexeme = source.substring(index, end);
         final lower = lexeme.toLowerCase();
+        final nextNonWhitespace = _nextNonWhitespace(source, end);
         final tokenStyle = switch (true) {
-          _ when _keywordSet.contains(lower) => baseStyle.copyWith(
-            color: _keywordColor,
+          _ when _constantSet.contains(lower) => baseStyle.copyWith(
+            color: theme.sqlSyntax.constant,
             fontWeight: FontWeight.w700,
           ),
-          _ when _functionSet.contains(lower) => baseStyle.copyWith(
-            color: _functionColor,
+          _ when _functionSet.contains(lower) && nextNonWhitespace == '(' =>
+            baseStyle.copyWith(color: theme.sqlSyntax.function),
+          _ when _typeSet.contains(lower) => baseStyle.copyWith(
+            color: theme.sqlSyntax.type,
           ),
-          _ => baseStyle,
+          _ when _keywordSet.contains(lower) => baseStyle.copyWith(
+            color: theme.sqlSyntax.keyword,
+            fontWeight: FontWeight.w700,
+          ),
+          _ => baseStyle.copyWith(color: theme.sqlSyntax.identifier),
         };
         spans.add(TextSpan(text: lexeme, style: tokenStyle));
         index = end;
+        continue;
+      }
+
+      if (_operatorChars.contains(current)) {
+        spans.add(
+          TextSpan(
+            text: current,
+            style: baseStyle.copyWith(color: theme.sqlSyntax.operator),
+          ),
+        );
+        index++;
         continue;
       }
 
@@ -144,32 +229,35 @@ class SqlHighlightingTextEditingController extends TextEditingController {
     return source.length;
   }
 
-  static int _scanSingleQuotedString(String source, int index) {
+  static _StringScanResult _scanSingleQuotedString(String source, int index) {
     while (index < source.length) {
       if (source[index] == '\'') {
         if (index + 1 < source.length && source[index + 1] == '\'') {
           index += 2;
           continue;
         }
-        return index + 1;
+        return _StringScanResult(end: index + 1, terminated: true);
       }
       index++;
     }
-    return source.length;
+    return _StringScanResult(end: source.length, terminated: false);
   }
 
-  static int _scanDoubleQuotedIdentifier(String source, int index) {
+  static _StringScanResult _scanDoubleQuotedIdentifier(
+    String source,
+    int index,
+  ) {
     while (index < source.length) {
       if (source[index] == '"') {
         if (index + 1 < source.length && source[index + 1] == '"') {
           index += 2;
           continue;
         }
-        return index + 1;
+        return _StringScanResult(end: index + 1, terminated: true);
       }
       index++;
     }
-    return source.length;
+    return _StringScanResult(end: source.length, terminated: false);
   }
 
   static int _scanNumber(String source, int index) {
@@ -190,6 +278,43 @@ class SqlHighlightingTextEditingController extends TextEditingController {
     return index;
   }
 
+  static bool _isParameterStart(String source, int index) {
+    final current = source[index];
+    if (current == '?') {
+      return true;
+    }
+    if ((current == ':' || current == '@') &&
+        index + 1 < source.length &&
+        _isIdentifierStart(source[index + 1])) {
+      return true;
+    }
+    if (current == r'$' &&
+        index + 1 < source.length &&
+        (_isIdentifierStart(source[index + 1]) ||
+            _isDigit(source[index + 1]))) {
+      return true;
+    }
+    return false;
+  }
+
+  static int _scanParameter(String source, int index) {
+    while (index < source.length && _isIdentifierPart(source[index])) {
+      index++;
+    }
+    return index;
+  }
+
+  static String? _nextNonWhitespace(String source, int index) {
+    while (index < source.length) {
+      final current = source[index];
+      if (current.trim().isNotEmpty) {
+        return current;
+      }
+      index++;
+    }
+    return null;
+  }
+
   static bool _isDigit(String value) {
     final codeUnit = value.codeUnitAt(0);
     return codeUnit >= 48 && codeUnit <= 57;
@@ -205,4 +330,11 @@ class SqlHighlightingTextEditingController extends TextEditingController {
   static bool _isIdentifierPart(String value) {
     return _isIdentifierStart(value) || _isDigit(value);
   }
+}
+
+class _StringScanResult {
+  const _StringScanResult({required this.end, required this.terminated});
+
+  final int end;
+  final bool terminated;
 }

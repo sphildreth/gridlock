@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../domain/workspace_models.dart';
 import '../../domain/workspace_shell_preferences.dart';
 import 'shell_pane_frame.dart';
@@ -271,15 +272,12 @@ class _ResultsSubtabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       height: 34,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+        color: tokens.resultsGrid.headerBackground,
+        border: Border(bottom: BorderSide(color: tokens.resultsGrid.gridLine)),
       ),
       child: Row(
         children: <Widget>[
@@ -317,23 +315,32 @@ class _ResultTabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? Theme.of(context).colorScheme.surface : null,
+          color: selected
+              ? tokens.resultsGrid.background
+              : tokens.resultsGrid.headerBackground,
           border: Border(
-            right: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
+            right: BorderSide(color: tokens.resultsGrid.gridLine),
             bottom: selected
                 ? BorderSide.none
                 : BorderSide(color: Colors.transparent),
           ),
         ),
-        child: Text(label),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: selected
+                ? tokens.resultsGrid.cellText
+                : tokens.resultsGrid.headerText,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -705,15 +712,16 @@ class _GridCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     final background = isHeader
-        ? theme.colorScheme.surfaceContainerHighest
+        ? tokens.resultsGrid.headerBackground
         : selected
-        ? theme.colorScheme.secondaryContainer
+        ? tokens.resultsGrid.rowSelectedBackground
         : edited
-        ? const Color(0xFFFFF3D6)
+        ? tokens.colors.warning.withValues(alpha: 0.18)
         : rowSelected
-        ? theme.colorScheme.surfaceContainerLow
-        : theme.colorScheme.surface;
+        ? tokens.resultsGrid.rowAltBackground
+        : tokens.resultsGrid.rowBackground;
 
     final child = Container(
       width: width,
@@ -724,8 +732,8 @@ class _GridCell extends StatelessWidget {
       decoration: BoxDecoration(
         color: background,
         border: Border(
-          right: BorderSide(color: theme.colorScheme.outlineVariant),
-          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+          right: BorderSide(color: tokens.resultsGrid.gridLine),
+          bottom: BorderSide(color: tokens.resultsGrid.gridLine),
         ),
       ),
       child: isHeader
@@ -738,6 +746,7 @@ class _GridCell extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelLarge?.copyWith(
                       fontWeight: FontWeight.w700,
+                      color: tokens.resultsGrid.headerText,
                     ),
                   ),
                 ),
@@ -748,6 +757,7 @@ class _GridCell extends StatelessWidget {
                   icon: Icon(
                     pinned ? Icons.push_pin : Icons.push_pin_outlined,
                     size: 14,
+                    color: tokens.colors.accent,
                   ),
                 ),
               ],
@@ -757,7 +767,12 @@ class _GridCell extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
+                fontFamily: tokens.fonts.editorFamily,
+                color: selected || rowSelected
+                    ? tokens.resultsGrid.rowSelectedText
+                    : text == 'NULL'
+                    ? tokens.resultsGrid.nullText
+                    : tokens.resultsGrid.cellText,
               ),
             ),
     );
@@ -793,25 +808,31 @@ class _RowHeaderCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     final child = Container(
       width: width,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: isHeader
-            ? theme.colorScheme.surfaceContainerHighest
+            ? tokens.resultsGrid.headerBackground
             : selected
-            ? theme.colorScheme.secondaryContainer
-            : theme.colorScheme.surfaceContainerLowest,
+            ? tokens.resultsGrid.rowSelectedBackground
+            : tokens.resultsGrid.rowAltBackground,
         border: Border(
-          right: BorderSide(color: theme.colorScheme.outlineVariant),
-          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+          right: BorderSide(color: tokens.resultsGrid.gridLine),
+          bottom: BorderSide(color: tokens.resultsGrid.gridLine),
         ),
       ),
       alignment: Alignment.centerRight,
       child: Text(
         label,
         style: theme.textTheme.bodySmall?.copyWith(
-          fontFamily: 'monospace',
+          fontFamily: tokens.fonts.editorFamily,
+          color: isHeader
+              ? tokens.resultsGrid.headerText
+              : selected
+              ? tokens.resultsGrid.rowSelectedText
+              : tokens.resultsGrid.cellText,
           fontWeight: isHeader || selected ? FontWeight.w700 : FontWeight.w500,
         ),
       ),
@@ -876,6 +897,7 @@ class _MessagesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     final messages = tab.messageHistory.isNotEmpty
         ? tab.messageHistory.reversed.toList()
         : <QueryMessageEntry>[
@@ -894,7 +916,7 @@ class _MessagesPanel extends StatelessWidget {
         final entry = messages[index];
         return Container(
           padding: const EdgeInsets.all(10),
-          color: Theme.of(context).colorScheme.surfaceContainerLowest,
+          color: tokens.colors.panelAltBg,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -906,9 +928,10 @@ class _MessagesPanel extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       _formatTimestamp(entry.timestamp),
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(fontFamily: 'monospace'),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontFamily: tokens.fonts.editorFamily,
+                        color: tokens.colors.textMuted,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(entry.message),
@@ -938,6 +961,7 @@ class _ExecutionPlanPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     final plan = tab.executionPlan;
     if (plan.isLoading && !plan.hasData) {
       return const _ExecutionPlanEmptyState(
@@ -961,12 +985,12 @@ class _ExecutionPlanPanel extends StatelessWidget {
           Container(
             margin: const EdgeInsets.all(12),
             padding: const EdgeInsets.all(10),
-            color: Theme.of(context).colorScheme.errorContainer,
+            color: tokens.colors.error.withValues(alpha: 0.14),
             child: Text(
               plan.errorMessage!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onErrorContainer,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: tokens.colors.error),
             ),
           ),
         Expanded(
@@ -986,12 +1010,8 @@ class _ExecutionPlanPanel extends StatelessWidget {
                     return Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerLowest,
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
+                        color: tokens.colors.panelAltBg,
+                        border: Border.all(color: tokens.resultsGrid.gridLine),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1003,10 +1023,8 @@ class _ExecutionPlanPanel extends StatelessWidget {
                               textAlign: TextAlign.right,
                               style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
-                                    fontFamily: 'monospace',
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                    fontFamily: tokens.fonts.editorFamily,
+                                    color: tokens.colors.textMuted,
                                   ),
                             ),
                           ),
@@ -1015,7 +1033,10 @@ class _ExecutionPlanPanel extends StatelessWidget {
                             child: Text(
                               formatCellValue(row[plan.columns.first]),
                               style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(fontFamily: 'monospace'),
+                                  ?.copyWith(
+                                    fontFamily: tokens.fonts.editorFamily,
+                                    color: tokens.resultsGrid.cellText,
+                                  ),
                             ),
                           ),
                         ],
@@ -1037,8 +1058,9 @@ class _ExecutionPlanPanel extends StatelessWidget {
                             column,
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  fontFamily: 'monospace',
+                                  fontFamily: tokens.fonts.editorFamily,
                                   fontWeight: FontWeight.w700,
+                                  color: tokens.resultsGrid.headerText,
                                 ),
                           ),
                         ),
@@ -1052,7 +1074,10 @@ class _ExecutionPlanPanel extends StatelessWidget {
                                 Text(
                                   formatCellValue(row[column]),
                                   style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(fontFamily: 'monospace'),
+                                      ?.copyWith(
+                                        fontFamily: tokens.fonts.editorFamily,
+                                        color: tokens.resultsGrid.cellText,
+                                      ),
                                 ),
                               ),
                           ],
@@ -1102,18 +1127,25 @@ class _InfoBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: tokens.colors.panelAltBg,
+        border: Border.all(color: tokens.colors.border),
+        borderRadius: BorderRadius.circular(tokens.metrics.borderRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 14),
+          Icon(icon, size: 14, color: tokens.colors.textMuted),
           const SizedBox(width: 6),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: tokens.colors.textMuted),
+          ),
         ],
       ),
     );
@@ -1127,10 +1159,11 @@ class _MessageLevelBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     final (label, color) = switch (level) {
-      QueryMessageLevel.info => ('INFO', Theme.of(context).colorScheme.primary),
-      QueryMessageLevel.warning => ('WARN', const Color(0xFFB26A00)),
-      QueryMessageLevel.error => ('ERROR', Theme.of(context).colorScheme.error),
+      QueryMessageLevel.info => ('INFO', tokens.colors.info),
+      QueryMessageLevel.warning => ('WARN', tokens.statusBar.warning),
+      QueryMessageLevel.error => ('ERROR', tokens.statusBar.error),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1139,7 +1172,7 @@ class _MessageLevelBadge extends StatelessWidget {
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
           color: color,
-          fontFamily: 'monospace',
+          fontFamily: tokens.fonts.editorFamily,
           fontWeight: FontWeight.w700,
         ),
       ),

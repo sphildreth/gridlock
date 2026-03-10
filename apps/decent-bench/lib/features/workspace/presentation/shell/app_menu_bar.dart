@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../application/menu_command_registry.dart';
 
 class NativeAppMenuHost extends StatelessWidget {
@@ -200,27 +201,22 @@ class AppMenuBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       width: double.infinity,
       alignment: Alignment.centerLeft,
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+        color: tokens.menu.background,
+        border: Border(bottom: BorderSide(color: tokens.menu.separator)),
       ),
       child: MenuBar(
         style: MenuStyle(
           padding: const WidgetStatePropertyAll<EdgeInsetsGeometry>(
             EdgeInsets.symmetric(horizontal: 2),
           ),
-          backgroundColor: WidgetStatePropertyAll(
-            Theme.of(context).colorScheme.surfaceContainerHighest,
-          ),
+          backgroundColor: WidgetStatePropertyAll(tokens.menu.background),
         ),
         children: <Widget>[
           SubmenuButton(
@@ -348,7 +344,7 @@ class AppMenuBar extends StatelessWidget {
       return const MenuItemButton(onPressed: null, child: Text('Missing'));
     }
     return MenuItemButton(
-      leadingIcon: Icon(command.icon, size: 18),
+      leadingIcon: Icon(command.icon, size: 16),
       trailingIcon: command.checked
           ? const Icon(Icons.check, size: 16)
           : const SizedBox.shrink(),

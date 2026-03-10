@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import 'schema_browser_models.dart';
 import 'shell_pane_frame.dart';
 
@@ -31,7 +32,9 @@ class _SelectionInspector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return ListView(
+      primary: false,
       padding: const EdgeInsets.all(12),
       children: <Widget>[
         _PropertyTable(
@@ -45,23 +48,34 @@ class _SelectionInspector extends StatelessWidget {
         ),
         if (selection.notes.isNotEmpty) ...<Widget>[
           const SizedBox(height: 12),
-          Text('Metadata / Notes', style: theme.textTheme.titleSmall),
+          Text(
+            'Metadata / Notes',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: tokens.properties.sectionHeaderText,
+            ),
+          ),
           const SizedBox(height: 8),
           for (final note in selection.notes) _MutedNote(note),
         ],
         if (selection.definition != null &&
             selection.definition!.trim().isNotEmpty) ...<Widget>[
           const SizedBox(height: 12),
-          Text('Definition', style: theme.textTheme.titleSmall),
+          Text(
+            'Definition',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: tokens.properties.sectionHeaderText,
+            ),
+          ),
           const SizedBox(height: 8),
           Container(
-            color: theme.colorScheme.surfaceContainerLowest,
+            color: tokens.properties.sectionHeaderBackground,
             padding: const EdgeInsets.all(10),
             child: SelectableText(
               selection.definition!,
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
+                fontFamily: tokens.fonts.editorFamily,
                 height: 1.4,
+                color: tokens.properties.value,
               ),
             ),
           ),
@@ -107,17 +121,19 @@ class _PropertyTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        color: tokens.properties.background,
+        border: Border.all(color: tokens.colors.border),
       ),
       child: Column(
         children: <Widget>[
           for (var i = 0; i < rows.length; i++)
             Container(
               color: i.isEven
-                  ? theme.colorScheme.surfaceContainerLowest
-                  : theme.colorScheme.surface,
+                  ? tokens.properties.sectionHeaderBackground
+                  : tokens.properties.background,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               child: Row(
                 children: <Widget>[
@@ -127,10 +143,18 @@ class _PropertyTable extends StatelessWidget {
                       rows[i].key,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w700,
+                        color: tokens.properties.label,
                       ),
                     ),
                   ),
-                  Expanded(child: Text(rows[i].value)),
+                  Expanded(
+                    child: Text(
+                      rows[i].value,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: tokens.properties.value,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -147,11 +171,17 @@ class _MutedNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
-      color: Theme.of(context).colorScheme.surfaceContainerLowest,
-      child: Text(text),
+      color: tokens.properties.sectionHeaderBackground,
+      child: Text(
+        text,
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: tokens.properties.value),
+      ),
     );
   }
 }

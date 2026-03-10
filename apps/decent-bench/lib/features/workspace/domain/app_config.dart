@@ -98,6 +98,40 @@ class EditorSettings {
   }
 }
 
+class AppearanceSettings {
+  static const String defaultActiveTheme = 'classic-dark';
+  static const Object _unset = Object();
+
+  const AppearanceSettings({required this.activeTheme, this.themesDir});
+
+  final String activeTheme;
+  final String? themesDir;
+
+  factory AppearanceSettings.defaults() {
+    return const AppearanceSettings(activeTheme: defaultActiveTheme);
+  }
+
+  AppearanceSettings copyWith({
+    String? activeTheme,
+    Object? themesDir = _unset,
+  }) {
+    return AppearanceSettings(
+      activeTheme: activeTheme ?? this.activeTheme,
+      themesDir: themesDir == _unset ? this.themesDir : themesDir as String?,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is AppearanceSettings &&
+        other.activeTheme == activeTheme &&
+        other.themesDir == themesDir;
+  }
+
+  @override
+  int get hashCode => Object.hash(activeTheme, themesDir);
+}
+
 class AppConfig {
   static const int currentConfigVersion = 1;
   static const int defaultPageSizeValue = 1000;
@@ -107,6 +141,7 @@ class AppConfig {
 
   const AppConfig({
     required this.configVersion,
+    required this.appearance,
     required this.recentFiles,
     required this.defaultPageSize,
     required this.csvDelimiter,
@@ -118,6 +153,7 @@ class AppConfig {
   });
 
   final int configVersion;
+  final AppearanceSettings appearance;
   final List<String> recentFiles;
   final int defaultPageSize;
   final String csvDelimiter;
@@ -130,6 +166,7 @@ class AppConfig {
   factory AppConfig.defaults() {
     return AppConfig(
       configVersion: currentConfigVersion,
+      appearance: AppearanceSettings.defaults(),
       recentFiles: const <String>[],
       defaultPageSize: defaultPageSizeValue,
       csvDelimiter: defaultCsvDelimiter,
@@ -143,6 +180,7 @@ class AppConfig {
 
   AppConfig copyWith({
     int? configVersion,
+    AppearanceSettings? appearance,
     List<String>? recentFiles,
     int? defaultPageSize,
     String? csvDelimiter,
@@ -154,6 +192,7 @@ class AppConfig {
   }) {
     return AppConfig(
       configVersion: configVersion ?? this.configVersion,
+      appearance: appearance ?? this.appearance,
       recentFiles: recentFiles ?? this.recentFiles,
       defaultPageSize: defaultPageSize ?? this.defaultPageSize,
       csvDelimiter: csvDelimiter ?? this.csvDelimiter,
@@ -211,6 +250,16 @@ class AppConfig {
       )
       ..writeln('editor_indent_spaces = ${editorSettings.indentSpaces}')
       ..writeln('editor_snippet_count = ${snippets.length}')
+      ..writeln()
+      ..writeln('[appearance]')
+      ..writeln('active_theme = ${jsonEncode(appearance.activeTheme)}');
+
+    if (appearance.themesDir != null &&
+        appearance.themesDir!.trim().isNotEmpty) {
+      buffer.writeln('themes_dir = ${jsonEncode(appearance.themesDir)}');
+    }
+
+    buffer
       ..writeln()
       ..writeln('[layout]')
       ..writeln(
@@ -315,6 +364,26 @@ class AppConfig {
           final parsed = int.tryParse(value);
           if (parsed != null && parsed >= 0) {
             config = config.copyWith(configVersion: parsed);
+          }
+          break;
+        case 'appearance.active_theme':
+          final parsed = _decodeJsonString(value);
+          if (parsed != null && parsed.trim().isNotEmpty) {
+            config = config.copyWith(
+              appearance: config.appearance.copyWith(
+                activeTheme: parsed.trim(),
+              ),
+            );
+          }
+          break;
+        case 'appearance.themes_dir':
+          final parsed = _decodeJsonString(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              appearance: config.appearance.copyWith(
+                themesDir: parsed.trim().isEmpty ? null : parsed.trim(),
+              ),
+            );
           }
           break;
         case 'default_page_size':
