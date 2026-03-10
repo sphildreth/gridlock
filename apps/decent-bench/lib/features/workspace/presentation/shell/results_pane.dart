@@ -82,17 +82,10 @@ class ResultsPane extends StatelessWidget {
     super.key,
     required this.activeTab,
     required this.activeResultsTab,
-    required this.exportPathController,
-    required this.delimiterController,
     required this.verticalScrollController,
     required this.horizontalScrollController,
-    required this.csvIncludeHeaders,
     required this.interactionState,
     required this.onResultsTabChanged,
-    required this.onExportPathChanged,
-    required this.onDelimiterSubmitted,
-    required this.onHeadersChanged,
-    required this.onExportCsv,
     required this.onLoadNextPage,
     required this.onSelectCell,
     required this.onSelectRow,
@@ -101,17 +94,10 @@ class ResultsPane extends StatelessWidget {
 
   final QueryTabState activeTab;
   final ResultsPaneTab activeResultsTab;
-  final TextEditingController exportPathController;
-  final TextEditingController delimiterController;
   final ScrollController verticalScrollController;
   final ScrollController horizontalScrollController;
-  final bool csvIncludeHeaders;
   final ResultsGridInteractionState interactionState;
   final ValueChanged<ResultsPaneTab> onResultsTabChanged;
-  final ValueChanged<String> onExportPathChanged;
-  final ValueChanged<String> onDelimiterSubmitted;
-  final ValueChanged<bool> onHeadersChanged;
-  final VoidCallback onExportCsv;
   final VoidCallback onLoadNextPage;
   final void Function(int rowIndex, String columnName) onSelectCell;
   final ValueChanged<int> onSelectRow;
@@ -125,15 +111,8 @@ class ResultsPane extends StatelessWidget {
       leadingIcon: Icons.table_view_outlined,
       toolbar: _ResultsToolbar(
         activeTab: activeTab,
-        exportPathController: exportPathController,
-        delimiterController: delimiterController,
-        csvIncludeHeaders: csvIncludeHeaders,
         pinnedColumnCount: interactionState.pinnedColumns.length,
         selectedRowCount: interactionState.selectedRows.length,
-        onExportPathChanged: onExportPathChanged,
-        onDelimiterSubmitted: onDelimiterSubmitted,
-        onHeadersChanged: onHeadersChanged,
-        onExportCsv: onExportCsv,
       ),
       padding: EdgeInsets.zero,
       child: Column(
@@ -177,88 +156,37 @@ class ResultsPane extends StatelessWidget {
 class _ResultsToolbar extends StatelessWidget {
   const _ResultsToolbar({
     required this.activeTab,
-    required this.exportPathController,
-    required this.delimiterController,
-    required this.csvIncludeHeaders,
     required this.pinnedColumnCount,
     required this.selectedRowCount,
-    required this.onExportPathChanged,
-    required this.onDelimiterSubmitted,
-    required this.onHeadersChanged,
-    required this.onExportCsv,
   });
 
   final QueryTabState activeTab;
-  final TextEditingController exportPathController;
-  final TextEditingController delimiterController;
-  final bool csvIncludeHeaders;
   final int pinnedColumnCount;
   final int selectedRowCount;
-  final ValueChanged<String> onExportPathChanged;
-  final ValueChanged<String> onDelimiterSubmitted;
-  final ValueChanged<bool> onHeadersChanged;
-  final VoidCallback onExportCsv;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: exportPathController,
-                onChanged: onExportPathChanged,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Export path',
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 90,
-              child: TextField(
-                controller: delimiterController,
-                onSubmitted: onDelimiterSubmitted,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Delim',
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilterChip(
-              label: const Text('Headers'),
-              selected: csvIncludeHeaders,
-              onSelected: onHeadersChanged,
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: activeTab.isExporting ? null : onExportCsv,
-              icon: const Icon(Icons.download_rounded, size: 16),
-              label: Text(activeTab.isExporting ? 'Exporting' : 'Export CSV'),
-            ),
-          ],
+        _InfoBadge(
+          icon: Icons.push_pin_outlined,
+          label: 'Pinned $pinnedColumnCount',
         ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: <Widget>[
-            const _FormatBadge(icon: Icons.data_object, label: 'JSON'),
-            const _FormatBadge(icon: Icons.view_column, label: 'Parquet'),
-            const _FormatBadge(icon: Icons.table_chart, label: 'Excel'),
-            _InfoBadge(
-              icon: Icons.push_pin_outlined,
-              label: 'Pinned $pinnedColumnCount',
-            ),
-            _InfoBadge(
-              icon: Icons.select_all_outlined,
-              label: 'Rows $selectedRowCount',
-            ),
-          ],
+        _InfoBadge(
+          icon: Icons.select_all_outlined,
+          label: 'Rows $selectedRowCount',
+        ),
+        _InfoBadge(
+          icon: Icons.chat_bubble_outline,
+          label: 'Messages ${activeTab.messageHistory.length}',
+        ),
+        _InfoBadge(
+          icon: activeTab.hasMoreRows
+              ? Icons.unfold_more_outlined
+              : Icons.check_circle_outline,
+          label: activeTab.hasMoreRows ? 'More rows available' : 'Page loaded',
         ),
       ],
     );
@@ -832,31 +760,6 @@ class _ExecutionPlanPanel extends StatelessWidget {
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium,
         ),
-      ),
-    );
-  }
-}
-
-class _FormatBadge extends StatelessWidget {
-  const _FormatBadge({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 14),
-          const SizedBox(width: 6),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
       ),
     );
   }

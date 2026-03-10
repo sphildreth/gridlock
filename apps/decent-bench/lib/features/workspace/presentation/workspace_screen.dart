@@ -21,6 +21,7 @@ import '../domain/workspace_models.dart';
 import '../infrastructure/app_lifecycle_service.dart';
 import '../infrastructure/shortcut_config_service.dart';
 import 'excel_import_dialog.dart';
+import 'export_results_csv_dialog.dart';
 import 'shell/app_menu_bar.dart';
 import 'shell/command_toolbar.dart';
 import 'shell/properties_pane.dart';
@@ -52,13 +53,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     label: 'DecentDB',
     extensions: <String>['ddb'],
   );
+  static const _csvTypeGroup = XTypeGroup(
+    label: 'CSV',
+    extensions: <String>['csv'],
+  );
 
   late final TextEditingController _sqlController = TextEditingController();
   late final TextEditingController _paramsController = TextEditingController();
-  late final TextEditingController _exportPathController =
-      TextEditingController();
-  late final TextEditingController _delimiterController =
-      TextEditingController();
   late final TextEditingController _findController = TextEditingController();
   late final FocusNode _sqlFocusNode = FocusNode(debugLabel: 'sql-editor')
     ..addListener(_handleFocusChanged);
@@ -132,8 +133,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ..removeListener(_handleFocusChanged)
       ..dispose();
     _findController.dispose();
-    _delimiterController.dispose();
-    _exportPathController.dispose();
     _paramsController.dispose();
     _sqlController.dispose();
     super.dispose();
@@ -203,6 +202,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     child: Stack(
                       children: <Widget>[
                         Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
                             if (!_nativeMenuAvailable ||
                                 !_didCheckNativeMenuAvailability)
@@ -289,30 +289,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                       activeTab: activeTab,
                                       activeResultsTab:
                                           shellPreferences.activeResultsTab,
-                                      exportPathController:
-                                          _exportPathController,
-                                      delimiterController: _delimiterController,
                                       verticalScrollController:
                                           _resultsVerticalController,
                                       horizontalScrollController:
                                           _resultsHorizontalController,
-                                      csvIncludeHeaders:
-                                          controller.config.csvIncludeHeaders,
                                       interactionState: resultsState,
                                       onResultsTabChanged:
                                           _shellController.setActiveResultsTab,
-                                      onExportPathChanged:
-                                          controller.updateActiveExportPath,
-                                      onDelimiterSubmitted:
-                                          controller.updateCsvDelimiter,
-                                      onHeadersChanged: (value) {
-                                        controller.updateCsvIncludeHeaders(
-                                          value,
-                                        );
-                                      },
-                                      onExportCsv: () {
-                                        controller.exportCurrentQuery();
-                                      },
                                       onLoadNextPage: () {
                                         controller.fetchNextPage();
                                       },
@@ -367,8 +350,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   ) {
     _syncTextController(_sqlController, activeTab.sql);
     _syncTextController(_paramsController, activeTab.parameterJson);
-    _syncTextController(_exportPathController, activeTab.exportPath);
-    _syncTextController(_delimiterController, controller.config.csvDelimiter);
   }
 
   void _syncTextController(TextEditingController controller, String value) {
@@ -1299,8 +1280,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           id: 'export_results_csv',
           label: 'Export Results as CSV...',
           icon: Icons.file_download_outlined,
-          onInvoke: controller.exportCurrentQuery,
-          enabled: true,
+          onInvoke: _showCsvExportDialog,
+          enabled: controller.activeTab.canExport,
         ),
         command(
           id: 'export_results_json',
@@ -1597,6 +1578,42 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         );
       },
     );
+  }
+
+  Future<void> _showCsvExportDialog() async {
+    final controller = widget.controller;
+    final activeTab = controller.activeTab;
+    final result = await showDialog<CsvExportDialogResult>(
+      context: context,
+      builder: (context) {
+        return CsvExportDialog(
+          queryTitle: activeTab.title,
+          initialPath: activeTab.exportPath.trim().isEmpty
+              ? controller.suggestExportPath()
+              : activeTab.exportPath.trim(),
+          initialDelimiter: controller.config.csvDelimiter,
+          initialIncludeHeaders: controller.config.csvIncludeHeaders,
+          onBrowse: (currentPath) async {
+            final initialName = currentPath.trim().isEmpty
+                ? p.basename(controller.suggestExportPath())
+                : p.basename(currentPath.trim());
+            final location = await getSaveLocation(
+              suggestedName: initialName,
+              acceptedTypeGroups: const <XTypeGroup>[_csvTypeGroup],
+            );
+            return location?.path;
+          },
+        );
+      },
+    );
+    if (result == null) {
+      return;
+    }
+
+    controller.updateActiveExportPath(result.path);
+    await controller.updateCsvDelimiter(result.delimiter);
+    await controller.updateCsvIncludeHeaders(result.includeHeaders);
+    await controller.exportCurrentQuery();
   }
 
   Future<void> _handleIncomingFiles(Iterable<String> rawPaths) async {

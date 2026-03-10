@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
+import 'package:decent_bench/features/workspace/domain/app_config.dart';
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
@@ -23,6 +24,62 @@ void main() {
     expect(controller.workspaceMessage, 'Ready.');
     expect(controller.tabs, hasLength(1));
   });
+
+  test(
+    'initialize reopens the most recent workspace when it still exists',
+    () async {
+      final dbPath =
+          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final file = File(dbPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString('');
+
+      addTearDown(() async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      });
+
+      final config = AppConfig.defaults().copyWith(
+        recentFiles: <String>[dbPath],
+      );
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(config),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+
+      await controller.initialize();
+
+      expect(controller.databasePath, dbPath);
+      expect(controller.engineVersion, '1.6.1');
+      expect(controller.schema.tables.single.name, 'tasks');
+      expect(controller.workspaceError, isNull);
+    },
+  );
+
+  test(
+    'initialize falls back to the sample shell when the last workspace is missing',
+    () async {
+      final missingPath =
+          '${Directory.systemTemp.path}/missing-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final config = AppConfig.defaults().copyWith(
+        recentFiles: <String>[missingPath],
+      );
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(config),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+
+      await controller.initialize();
+
+      expect(controller.databasePath, isNull);
+      expect(controller.workspaceError, isNull);
+      expect(controller.workspaceMessage, 'Ready.');
+      expect(controller.schema.tables, isEmpty);
+    },
+  );
 
   test('openDatabase refreshes schema and stores recent files', () async {
     final dbPath =

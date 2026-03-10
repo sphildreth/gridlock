@@ -29,39 +29,36 @@ class StatusBar extends StatelessWidget {
           top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
       ),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                statusMessage,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              statusMessage,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  _StatusDivider(),
+                  Text(workspaceLabel, style: theme.textTheme.bodySmall),
+                  _StatusDivider(),
+                  Text(lastExecutionLabel, style: theme.textTheme.bodySmall),
+                  _StatusDivider(),
+                  Text(rowsLabel, style: theme.textTheme.bodySmall),
+                  _StatusDivider(),
+                  Text(editorModeLabel, style: theme.textTheme.bodySmall),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _StatusDivider(),
-                    Text(workspaceLabel, style: theme.textTheme.bodySmall),
-                    _StatusDivider(),
-                    Text(lastExecutionLabel, style: theme.textTheme.bodySmall),
-                    _StatusDivider(),
-                    Text(rowsLabel, style: theme.textTheme.bodySmall),
-                    _StatusDivider(),
-                    Text(editorModeLabel, style: theme.textTheme.bodySmall),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

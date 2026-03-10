@@ -134,6 +134,7 @@ class WorkspaceController extends ChangeNotifier {
       nativeLibraryPath = await _gateway.initialize();
       workspaceMessage = 'Ready.';
       workspaceError = null;
+      await _reopenMostRecentWorkspaceIfAvailable();
     } catch (error) {
       workspaceError = error.toString();
       workspaceMessage = null;
@@ -245,6 +246,26 @@ class WorkspaceController extends ChangeNotifier {
       (tab) => tab.copyWith(parameterJson: value),
       persist: true,
     );
+  }
+
+  Future<void> _reopenMostRecentWorkspaceIfAvailable() async {
+    final lastOpenedPath = config.recentFiles.isEmpty
+        ? null
+        : config.recentFiles.first.trim();
+    if (lastOpenedPath == null || lastOpenedPath.isEmpty) {
+      return;
+    }
+
+    final file = File(lastOpenedPath);
+    try {
+      if (!await file.exists()) {
+        return;
+      }
+    } on FileSystemException {
+      return;
+    }
+
+    await openDatabase(lastOpenedPath, createIfMissing: false);
   }
 
   void updateActiveExportPath(String value) {

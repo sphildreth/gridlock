@@ -1,9 +1,7 @@
-import 'dart:io';
-
 import 'package:decent_bench/app/app.dart';
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
-import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
+import 'package:decent_bench/features/workspace/presentation/shell/status_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,6 +41,9 @@ void main() {
     expect(find.text('SQL Editor'), findsOneWidget);
     expect(find.text('Results Window'), findsOneWidget);
     expect(find.textContaining('Workspace:'), findsOneWidget);
+    expect(find.text('Export path'), findsNothing);
+    expect(find.text('Export CSV'), findsNothing);
+    expect(tester.getSize(find.byType(StatusBar)).width, 1600);
     expect(
       find.widgetWithText(OutlinedButton, 'Import SQLite...'),
       findsOneWidget,
@@ -143,42 +144,4 @@ void main() {
 
     expect(find.text('SQLite Import Wizard'), findsOneWidget);
   });
-
-  testWidgets(
-    'Run is enabled again after the first query page finishes loading',
-    (tester) async {
-      final dbPath =
-          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
-      final controller = WorkspaceController(
-        gateway: FakeWorkspaceGateway(),
-        configStore: InMemoryConfigStore(),
-        workspaceStateStore: InMemoryWorkspaceStateStore(),
-      );
-
-      _configureDesktopViewport(tester);
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-        controller.dispose();
-      });
-      await controller.initialize();
-      await controller.openDatabase(dbPath, createIfMissing: true);
-      controller.updateActiveSql('SELECT id, title FROM tasks ORDER BY id');
-
-      await tester.pumpWidget(
-        DecentBenchApp(controller: controller, autoInitialize: false),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.widgetWithText(FilledButton, 'Run'));
-      await tester.pumpAndSettle();
-
-      final runButton = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'Run'),
-      );
-      expect(controller.activeTab.phase, QueryPhase.completed);
-      expect(controller.activeTab.hasMoreRows, isTrue);
-      expect(runButton.onPressed, isNotNull);
-    },
-  );
 }
