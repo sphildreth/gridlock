@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_shell_preferences.dart';
+import 'package:decent_bench/features/workspace/infrastructure/app_config_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -105,6 +108,47 @@ editor_snippets = [{"id":"custom","name":"Custom","trigger":"custom","descriptio
 
     expect(parsed.snippets.single.id, 'custom');
     expect(parsed.snippets.single.description, 'Legacy');
+  });
+
+  test('AppConfigStore reads and writes the TOML file on disk', () async {
+    final file = File(
+      '${Directory.systemTemp.path}/decent-bench-config-${DateTime.now().microsecondsSinceEpoch}.toml',
+    );
+    final store = AppConfigStore(fileOverride: file);
+    final config = AppConfig.defaults().copyWith(
+      defaultPageSize: 333,
+      csvDelimiter: '|',
+      editorSettings: const EditorSettings(
+        autocompleteEnabled: false,
+        autocompleteMaxSuggestions: 18,
+        formatUppercaseKeywords: false,
+        indentSpaces: 4,
+      ),
+      shortcutBindings: <String, String>{
+        ...AppConfig.defaultShortcutBindings(),
+        'tools_run_query': 'Ctrl+Shift+Enter',
+      },
+    );
+
+    addTearDown(() async {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    });
+
+    await store.save(config);
+
+    final rawToml = await file.readAsString();
+    final loaded = await store.load();
+
+    expect(store.describeLocation(), file.path);
+    expect(rawToml, contains('default_page_size = 333'));
+    expect(rawToml, contains('csv_delimiter = "|"'));
+    expect(rawToml, contains('tools_run_query = "Ctrl+Shift+Enter"'));
+    expect(loaded.defaultPageSize, 333);
+    expect(loaded.csvDelimiter, '|');
+    expect(loaded.editorSettings.autocompleteEnabled, isFalse);
+    expect(loaded.shortcutBindings['tools_run_query'], 'Ctrl+Shift+Enter');
   });
 
   test('pushRecentFile keeps unique ordering and trims the list', () {

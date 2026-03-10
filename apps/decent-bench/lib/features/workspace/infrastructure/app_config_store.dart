@@ -8,6 +8,8 @@ abstract class WorkspaceConfigStore {
   Future<AppConfig> load();
 
   Future<void> save(AppConfig config);
+
+  String describeLocation();
 }
 
 class AppConfigStore implements WorkspaceConfigStore {
@@ -30,6 +32,9 @@ class AppConfigStore implements WorkspaceConfigStore {
     await file.parent.create(recursive: true);
     await file.writeAsString(config.toToml());
   }
+
+  @override
+  String describeLocation() => _resolveFile().path;
 
   File _resolveFile() {
     if (_fileOverride != null) {

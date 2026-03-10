@@ -23,6 +23,7 @@ import '../infrastructure/app_lifecycle_service.dart';
 import '../infrastructure/shortcut_config_service.dart';
 import 'excel_import_dialog.dart';
 import 'export_results_csv_dialog.dart';
+import 'preferences_dialog.dart';
 import 'shell/app_menu_bar.dart';
 import 'shell/command_toolbar.dart';
 import 'shell/properties_pane.dart';
@@ -1932,42 +1933,42 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Future<void> _showPreferencesDialog() {
-    final config = widget.controller.config;
-    return showDialog<void>(
+    return _showPreferencesDialogInternal();
+  }
+
+  Future<void> _showPreferencesDialogInternal() async {
+    await _shellController.persistNow();
+    await widget.controller.reloadConfig();
+    _shellController.replacePreferences(
+      widget.controller.config.shellPreferences,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Options / Preferences'),
-          content: SizedBox(
-            width: 480,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Default page size: ${config.defaultPageSize}'),
-                const SizedBox(height: 8),
-                Text('CSV delimiter: ${config.csvDelimiter}'),
-                const SizedBox(height: 8),
-                Text(
-                  'Autocomplete suggestions: ${config.editorSettings.autocompleteMaxSuggestions}',
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Editor zoom: ${(_shellController.preferences.editorZoom * 100).round()}%',
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'This dialog is intentionally lightweight for now. It shows where shell, editor, and export preferences will converge.',
-                ),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
+        return PreferencesDialog(
+          initialConfig: widget.controller.config,
+          configFilePath: widget.controller.configFilePath,
+          shortcutConfigService: _shortcutConfigService,
+          createSnippetId: widget.controller.createSnippetId,
+          onSave: (config) async {
+            final saved = await widget.controller.applyAppConfig(
+              config,
+              statusMessage:
+                  'Saved preferences to ${widget.controller.configFilePath}.',
+            );
+            if (saved) {
+              _shellController.replacePreferences(
+                widget.controller.config.shellPreferences,
+              );
+              return null;
+            }
+            return widget.controller.workspaceError ??
+                'Unable to save application preferences.';
+          },
         );
       },
     );

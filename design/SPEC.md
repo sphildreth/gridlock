@@ -112,6 +112,9 @@ formatter, JSON/Parquet/Excel export, and multi-tab editing.
 
 #### Config
 - TOML configuration file stored locally
+- Desktop `Options / Preferences` dialog reads from and writes to the TOML
+  application configuration file for editor, export, layout, shortcut, and
+  snippet settings
 
 #### Engineering governance
 - ADRs from day one using the provided template and README policy

@@ -101,6 +101,58 @@ void main() {
     expect((await store.load()).recentFiles, contains(dbPath));
   });
 
+  test('applyAppConfig persists and reloads TOML-backed preferences', () async {
+    final store = InMemoryConfigStore();
+    final controller = WorkspaceController(
+      gateway: FakeWorkspaceGateway(),
+      configStore: store,
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+    await controller.initialize();
+
+    final updatedConfig = controller.config.copyWith(
+      defaultPageSize: 250,
+      csvDelimiter: ';',
+      csvIncludeHeaders: false,
+      editorSettings: const EditorSettings(
+        autocompleteEnabled: false,
+        autocompleteMaxSuggestions: 18,
+        formatUppercaseKeywords: false,
+        indentSpaces: 4,
+      ),
+      shortcutBindings: <String, String>{
+        ...controller.config.shortcutBindings,
+        'tools_run_query': 'Ctrl+Shift+Enter',
+      },
+      snippets: const <SqlSnippet>[
+        SqlSnippet(
+          id: 'custom',
+          name: 'Custom',
+          trigger: 'custom',
+          description: 'Custom snippet',
+          body: 'SELECT * FROM custom_table;',
+        ),
+      ],
+    );
+
+    final saved = await controller.applyAppConfig(updatedConfig);
+
+    expect(saved, isTrue);
+    expect((await store.load()).defaultPageSize, 250);
+    expect((await store.load()).csvDelimiter, ';');
+
+    controller.config = AppConfig.defaults();
+    await controller.reloadConfig();
+
+    expect(controller.config.defaultPageSize, 250);
+    expect(controller.config.csvIncludeHeaders, isFalse);
+    expect(
+      controller.config.shortcutBindings['tools_run_query'],
+      'Ctrl+Shift+Enter',
+    );
+    expect(controller.config.snippets.single.trigger, 'custom');
+  });
+
   test('tabs own independent query state and results', () async {
     final dbPath =
         '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';

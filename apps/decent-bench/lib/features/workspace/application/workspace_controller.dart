@@ -94,6 +94,8 @@ class WorkspaceController extends ChangeNotifier {
         tab.phase == QueryPhase.fetching,
   );
 
+  String get configFilePath => _configStore.describeLocation();
+
   bool get canRunActiveTab => canRunTab(activeTabId);
 
   bool get canCancelActiveTab => tabById(activeTabId)?.canCancel ?? false;
@@ -965,6 +967,31 @@ class WorkspaceController extends ChangeNotifier {
   }) async {
     config = _layoutPersistenceService.save(config, preferences);
     await _persistConfig(statusMessage);
+  }
+
+  Future<void> reloadConfig() async {
+    try {
+      config = await _configStore.load();
+      workspaceError = null;
+      _safeNotify();
+    } catch (error) {
+      _setWorkspaceError(error.toString());
+    }
+  }
+
+  Future<bool> applyAppConfig(AppConfig next, {String? statusMessage}) async {
+    final validationError = _validateAppConfig(next);
+    if (validationError != null) {
+      _setWorkspaceError(validationError);
+      return false;
+    }
+
+    config = next.copyWith(
+      configVersion: AppConfig.currentConfigVersion,
+      shellPreferences: next.shellPreferences.normalized(),
+    );
+    await _persistConfig(statusMessage ?? 'Updated application preferences.');
+    return workspaceError == null;
   }
 
   void beginExcelImport({String sourcePath = ''}) {
@@ -2410,6 +2437,46 @@ class WorkspaceController extends ChangeNotifier {
     workspaceError = message;
     workspaceMessage = null;
     _safeNotify();
+  }
+
+  String? _validateAppConfig(AppConfig next) {
+    if (next.defaultPageSize <= 0) {
+      return 'Page size must be a positive integer.';
+    }
+    if (next.csvDelimiter.isEmpty) {
+      return 'CSV delimiter cannot be empty.';
+    }
+    if (next.editorSettings.autocompleteMaxSuggestions <= 0) {
+      return 'Autocomplete suggestions must be a positive integer.';
+    }
+    if (next.editorSettings.indentSpaces <= 0) {
+      return 'Indent spaces must be a positive integer.';
+    }
+
+    final snippetIds = <String>{};
+    final snippetTriggers = <String>{};
+    for (final snippet in next.snippets) {
+      if (snippet.id.trim().isEmpty) {
+        return 'Snippet identifiers cannot be empty.';
+      }
+      if (snippet.name.trim().isEmpty) {
+        return 'Snippet names cannot be empty.';
+      }
+      if (snippet.trigger.trim().isEmpty) {
+        return 'Snippet triggers cannot be empty.';
+      }
+      if (snippet.body.trim().isEmpty) {
+        return 'Snippet bodies cannot be empty.';
+      }
+      if (!snippetIds.add(snippet.id.trim())) {
+        return 'Snippet identifiers must be unique.';
+      }
+      if (!snippetTriggers.add(snippet.trigger.trim().toLowerCase())) {
+        return 'Snippet triggers must be unique.';
+      }
+    }
+
+    return null;
   }
 
   Future<void> _persistConfig([String? statusMessage]) async {

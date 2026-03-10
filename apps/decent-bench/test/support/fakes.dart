@@ -25,6 +25,9 @@ class InMemoryConfigStore implements WorkspaceConfigStore {
   Future<void> save(AppConfig config) async {
     _config = config;
   }
+
+  @override
+  String describeLocation() => 'memory://config.toml';
 }
 
 class InMemoryWorkspaceStateStore implements WorkspaceStateStore {

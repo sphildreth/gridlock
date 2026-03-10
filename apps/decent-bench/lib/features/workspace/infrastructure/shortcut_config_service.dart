@@ -27,23 +27,24 @@ class ShortcutConfigService {
     final defaults = AppConfig.defaultShortcutBindings();
     for (final entry in defaults.entries) {
       final rawValue = config.shortcutBindings[entry.key] ?? entry.value;
-      final parsed = _parseActivator(rawValue);
-      final fallback = _parseActivator(entry.value);
+      final parsed = tryParseActivator(rawValue);
+      final fallback = tryParseActivator(entry.value);
       final activator = parsed ?? fallback;
       if (activator == null) {
         continue;
       }
+      final effectiveRawValue = parsed == null ? entry.value : rawValue;
       bindings[entry.key] = ShortcutBinding(
         commandId: entry.key,
-        rawValue: rawValue,
+        rawValue: effectiveRawValue,
         activator: activator,
-        displayLabel: _displayLabel(rawValue),
+        displayLabel: displayLabel(effectiveRawValue),
       );
     }
     return bindings;
   }
 
-  SingleActivator? _parseActivator(String rawValue) {
+  SingleActivator? tryParseActivator(String rawValue) {
     final tokens = rawValue
         .split('+')
         .map((token) => token.trim())
@@ -103,7 +104,7 @@ class ShortcutConfigService {
     );
   }
 
-  String _displayLabel(String rawValue) {
+  String displayLabel(String rawValue) {
     final parts = rawValue
         .split('+')
         .map((token) => token.trim())
