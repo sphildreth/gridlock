@@ -31,6 +31,7 @@ import 'shell/results_pane.dart';
 import 'shell/schema_explorer_pane.dart';
 import 'shell/schema_browser_models.dart';
 import 'shell/sql_editor_pane.dart';
+import 'shell/sql_highlighting_text_controller.dart';
 import 'shell/status_bar.dart';
 import 'shell/workspace_layout_shell.dart';
 import 'sql_dump_import_dialog.dart';
@@ -62,7 +63,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     extensions: <String>['csv'],
   );
 
-  late final TextEditingController _sqlController = TextEditingController();
+  late final SqlHighlightingTextEditingController _sqlController =
+      SqlHighlightingTextEditingController();
   late final TextEditingController _paramsController = TextEditingController();
   late final TextEditingController _findController = TextEditingController();
   late final FocusNode _sqlFocusNode = FocusNode(debugLabel: 'sql-editor')
@@ -105,6 +107,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _nativeMenuAvailable = false;
   bool _didCheckNativeMenuAvailability = false;
   bool _didProcessStartupLaunchOptions = false;
+  int _autocompleteSelectionIndex = 0;
   final Map<String, ResultsGridInteractionState> _resultsStateByTabId =
       <String, ResultsGridInteractionState>{};
 
@@ -181,8 +184,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final shortcuts = _shortcutConfigService.load(controller.config);
         final registry = _buildMenuCommandRegistry(controller, shortcuts);
         final autocompleteResult = _autocompleteFor(controller);
+        final selectedAutocompleteIndex = _selectedAutocompleteIndexFor(
+          autocompleteResult,
+        );
         final shellPreferences = _shellController.preferences;
         final resultsState = _resultsStateFor(activeTab.id);
+        final usePlaceholderContent = _usePlaceholderContent(controller);
 
         return DropTarget(
           enable: !controller.hasImportSession,
@@ -232,6 +239,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         _selectedSchemaNodeId = nodeId;
                                       });
                                     },
+                                    onShowNodeMenu: _showSchemaNodeContextMenu,
                                     onRefresh: () {
                                       controller.refreshSchema();
                                     },
@@ -260,7 +268,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                     findController: _findController,
                                     findFocusNode: _findFocusNode,
                                     findStatusLabel: _findStatusLabel(),
-                                    onSqlChanged: controller.updateActiveSql,
+                                    onSqlChanged: _handleSqlChanged,
                                     onParamsChanged:
                                         controller.updateActiveParameterJson,
                                     onSelectTab: controller.selectTab,
@@ -274,13 +282,26 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                     },
                                     onFormatSql: _formatActiveSql,
                                     onInsertSnippet: _insertSnippet,
-                                    onManageSnippets: () {
-                                      _showSnippetBrowser();
-                                    },
                                     onApplyAutocomplete: (suggestion) =>
                                         _applyAutocompleteSuggestion(
                                           autocompleteResult,
                                           suggestion,
+                                        ),
+                                    selectedAutocompleteIndex:
+                                        selectedAutocompleteIndex,
+                                    onAutocompleteNext: () =>
+                                        _moveAutocompleteSelection(
+                                          autocompleteResult,
+                                          1,
+                                        ),
+                                    onAutocompletePrevious: () =>
+                                        _moveAutocompleteSelection(
+                                          autocompleteResult,
+                                          -1,
+                                        ),
+                                    onAcceptAutocomplete: () =>
+                                        _acceptAutocompleteSuggestion(
+                                          autocompleteResult,
                                         ),
                                     canRun: controller.canRunActiveTab,
                                     canStop: controller.canCancelActiveTab,
@@ -306,8 +327,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         controller.fetchNextPage();
                                       },
                                       onSelectCell: _selectResultsCell,
+                                      onShowCellMenu: _showResultsCellMenu,
                                       onSelectRow: _selectResultsRow,
                                       onTogglePinnedColumn: _togglePinnedColumn,
+                                      usePlaceholderContent:
+                                          usePlaceholderContent,
                                     ),
                                   ),
                                 ),
@@ -324,7 +348,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                 lastExecutionLabel:
                                     'Last execution: ${activeTab.elapsed?.inMilliseconds ?? 142} ms',
                                 rowsLabel:
-                                    'Rows: ${activeTab.resultRows.isNotEmpty ? activeTab.resultRows.length : activeTab.rowsAffected ?? 250}',
+                                    'Rows: ${activeTab.resultRows.isNotEmpty ? activeTab.resultRows.length : activeTab.rowsAffected ?? (controller.hasOpenDatabase ? 0 : 250)}',
                                 editorModeLabel: _editorModeLabel(),
                               ),
                           ],
@@ -384,6 +408,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       text: value,
       selection: TextSelection.collapsed(offset: math.max(offset, 0)),
     );
+  }
+
+  void _handleSqlChanged(String value) {
+    _autocompleteSelectionIndex = 0;
+    widget.controller.updateActiveSql(value);
   }
 
   SchemaSelectionDetails? _selectedSchemaSelection(
@@ -704,6 +733,39 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  int _selectedAutocompleteIndexFor(AutocompleteResult result) {
+    if (result.isEmpty) {
+      return 0;
+    }
+    return _autocompleteSelectionIndex
+        .clamp(0, result.suggestions.length - 1)
+        .toInt();
+  }
+
+  void _moveAutocompleteSelection(AutocompleteResult result, int delta) {
+    if (result.isEmpty) {
+      return;
+    }
+    final nextIndex =
+        (_selectedAutocompleteIndexFor(result) + delta) %
+        result.suggestions.length;
+    setState(() {
+      _autocompleteSelectionIndex = nextIndex < 0
+          ? result.suggestions.length - 1
+          : nextIndex;
+    });
+  }
+
+  void _acceptAutocompleteSuggestion(AutocompleteResult result) {
+    if (result.isEmpty) {
+      return;
+    }
+    _applyAutocompleteSuggestion(
+      result,
+      result.suggestions[_selectedAutocompleteIndexFor(result)],
+    );
+  }
+
   Future<void> _checkNativeMenuAvailability() async {
     if (kIsWeb ||
         !(Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
@@ -753,20 +815,43 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       () => const ResultsGridInteractionState(),
     );
     final tab = widget.controller.tabById(tabId) ?? widget.controller.activeTab;
-    final rows = resolveResultsRows(tab);
-    final columns = resolveResultsColumns(tab);
+    final usePlaceholderContent = _usePlaceholderContent(widget.controller);
+    final rows = resolveResultsRows(
+      tab,
+      usePlaceholderContent: usePlaceholderContent,
+    );
+    final columns = resolveResultsColumns(
+      tab,
+      usePlaceholderContent: usePlaceholderContent,
+    );
+    final shouldResetForExecution =
+        current.executionGeneration != tab.executionGeneration;
     final normalized = current.copyWith(
-      selectedRows: current.selectedRows
-          .where((rowIndex) => rowIndex >= 0 && rowIndex < rows.length)
-          .toSet(),
-      selectedCell:
-          current.selectedCell != null &&
-              current.selectedCell!.rowIndex >= 0 &&
-              current.selectedCell!.rowIndex < rows.length &&
-              columns.contains(current.selectedCell!.columnName)
+      selectedRows: shouldResetForExecution
+          ? const <int>{}
+          : current.selectedRows
+                .where((rowIndex) => rowIndex >= 0 && rowIndex < rows.length)
+                .toSet(),
+      selectedCell: shouldResetForExecution
+          ? null
+          : current.selectedCell != null &&
+                current.selectedCell!.rowIndex >= 0 &&
+                current.selectedCell!.rowIndex < rows.length &&
+                columns.contains(current.selectedCell!.columnName)
           ? current.selectedCell
           : null,
       pinnedColumns: current.pinnedColumns.where(columns.contains).toSet(),
+      cellOverrides: shouldResetForExecution
+          ? const <ResultsGridCellKey, Object?>{}
+          : Map<ResultsGridCellKey, Object?>.fromEntries(
+              current.cellOverrides.entries.where(
+                (entry) =>
+                    entry.key.rowIndex >= 0 &&
+                    entry.key.rowIndex < rows.length &&
+                    columns.contains(entry.key.columnName),
+              ),
+            ),
+      executionGeneration: tab.executionGeneration,
     );
     _resultsStateByTabId[tabId] = normalized;
     return normalized;
@@ -797,6 +882,79 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     });
     _resultsFocusNode.requestFocus();
+  }
+
+  Future<void> _showResultsCellMenu(
+    int rowIndex,
+    String columnName,
+    Offset globalPosition,
+  ) async {
+    _selectResultsCell(rowIndex, columnName);
+    final clipboardText = (await Clipboard.getData(
+      Clipboard.kTextPlain,
+    ))?.text?.trim();
+    final canPaste = clipboardText != null && clipboardText.isNotEmpty;
+    final canSetNull = _isSelectedResultsCellNullable(
+      rowIndex: rowIndex,
+      columnName: columnName,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    final action = await showMenu<_ResultsCellMenuAction>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        globalPosition.dx,
+        globalPosition.dy,
+      ),
+      items: <PopupMenuEntry<_ResultsCellMenuAction>>[
+        _popupMenuItem(
+          value: _ResultsCellMenuAction.copy,
+          icon: Icons.copy_outlined,
+          label: 'Copy',
+        ),
+        _popupMenuItem(
+          value: _ResultsCellMenuAction.paste,
+          icon: Icons.content_paste_outlined,
+          label: 'Paste',
+          enabled: canPaste,
+        ),
+        _popupMenuItem(
+          value: _ResultsCellMenuAction.setNull,
+          icon: Icons.exposure_zero_outlined,
+          label: 'Set To Null',
+          enabled: canSetNull,
+        ),
+      ],
+    );
+    if (action == null) {
+      return;
+    }
+
+    switch (action) {
+      case _ResultsCellMenuAction.copy:
+        await _copyResultsSelection();
+        break;
+      case _ResultsCellMenuAction.paste:
+        if (clipboardText != null && clipboardText.isNotEmpty) {
+          _updateSelectedResultsCellValue(
+            rowIndex: rowIndex,
+            columnName: columnName,
+            value: clipboardText,
+          );
+        }
+        break;
+      case _ResultsCellMenuAction.setNull:
+        _updateSelectedResultsCellValue(
+          rowIndex: rowIndex,
+          columnName: columnName,
+          value: null,
+        );
+        break;
+    }
   }
 
   void _togglePinnedColumn(String columnName) {
@@ -1007,6 +1165,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Future<void> _pasteIntoFocusedField() async {
+    if (_resultsFocusNode.hasFocus) {
+      final pasteText = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+      final selectedCell = _resultsStateFor(
+        widget.controller.activeTabId,
+      ).selectedCell;
+      if (pasteText == null || pasteText.isEmpty || selectedCell == null) {
+        return;
+      }
+      _updateSelectedResultsCellValue(
+        rowIndex: selectedCell.rowIndex,
+        columnName: selectedCell.columnName,
+        value: pasteText,
+      );
+      return;
+    }
     final field = _focusedEditableField();
     if (field == null) {
       return;
@@ -1052,16 +1225,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   Future<void> _copyResultsSelection() async {
     final tab = widget.controller.activeTab;
-    final rows = resolveResultsRows(tab);
-    final columns = resolveResultsColumns(tab);
+    final usePlaceholderContent = _usePlaceholderContent(widget.controller);
+    final columns = resolveResultsColumns(
+      tab,
+      usePlaceholderContent: usePlaceholderContent,
+    );
     final state = _resultsStateFor(tab.id);
-    if (state.selectedCell != null &&
-        state.selectedCell!.rowIndex >= 0 &&
-        state.selectedCell!.rowIndex < rows.length) {
+    if (state.selectedCell != null && state.selectedCell!.rowIndex >= 0) {
       final cell = state.selectedCell!;
       await Clipboard.setData(
         ClipboardData(
-          text: formatCellValue(rows[cell.rowIndex][cell.columnName]),
+          text: formatCellValue(
+            resolveResultsCellValue(
+              tab,
+              state,
+              cell.rowIndex,
+              cell.columnName,
+              usePlaceholderContent: usePlaceholderContent,
+            ),
+          ),
         ),
       );
       return;
@@ -1072,16 +1254,83 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final buffer = StringBuffer()..writeln(columns.join('\t'));
     final sortedRows = state.selectedRows.toList()..sort();
     for (final rowIndex in sortedRows) {
-      if (rowIndex < 0 || rowIndex >= rows.length) {
-        continue;
-      }
       buffer.writeln(
         columns
-            .map((column) => formatCellValue(rows[rowIndex][column]))
+            .map(
+              (column) => formatCellValue(
+                resolveResultsCellValue(
+                  tab,
+                  state,
+                  rowIndex,
+                  column,
+                  usePlaceholderContent: usePlaceholderContent,
+                ),
+              ),
+            )
             .join('\t'),
       );
     }
     await Clipboard.setData(ClipboardData(text: buffer.toString().trimRight()));
+  }
+
+  void _updateSelectedResultsCellValue({
+    required int rowIndex,
+    required String columnName,
+    required Object? value,
+  }) {
+    final tabId = widget.controller.activeTabId;
+    final current = _resultsStateFor(tabId);
+    final nextOverrides = Map<ResultsGridCellKey, Object?>.from(
+      current.cellOverrides,
+    )..[ResultsGridCellKey(rowIndex: rowIndex, columnName: columnName)] = value;
+    setState(() {
+      _resultsStateByTabId[tabId] = current.copyWith(
+        selectedRows: <int>{rowIndex},
+        selectedCell: ResultsGridCellSelection(
+          rowIndex: rowIndex,
+          columnName: columnName,
+        ),
+        cellOverrides: nextOverrides,
+      );
+    });
+    _resultsFocusNode.requestFocus();
+  }
+
+  bool _isSelectedResultsCellNullable({
+    required int rowIndex,
+    required String columnName,
+  }) {
+    final tab = widget.controller.activeTab;
+    final sql = (tab.lastSql ?? tab.sql).trim();
+    final objectName = _firstObjectNameInFromClause(sql);
+    if (objectName == null) {
+      return false;
+    }
+    final object = widget.controller.schema.objectNamed(objectName);
+    if (object == null || rowIndex < 0) {
+      return false;
+    }
+    for (final column in object.columns) {
+      if (column.name == columnName) {
+        return !column.notNull;
+      }
+    }
+    return false;
+  }
+
+  String? _firstObjectNameInFromClause(String sql) {
+    final quotedMatch = RegExp(
+      r'\bFROM\s+"((?:[^"]|"")+)"',
+      caseSensitive: false,
+    ).firstMatch(sql);
+    if (quotedMatch != null) {
+      return quotedMatch.group(1)?.replaceAll('""', '"');
+    }
+    final bareMatch = RegExp(
+      r'\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)',
+      caseSensitive: false,
+    ).firstMatch(sql);
+    return bareMatch?.group(1);
   }
 
   _EditableFieldBinding? _focusedEditableField() {
@@ -1452,9 +1701,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         ),
         command(
           id: 'tools_snippets',
-          label: 'Snippets',
-          icon: Icons.snippet_folder_outlined,
-          onInvoke: _showSnippetBrowser,
+          label: 'Manage Snippets',
+          icon: Icons.library_books_outlined,
+          onInvoke: () => _showPreferencesDialog(
+            initialSection: PreferencesDialogSection.snippets,
+          ),
         ),
         command(
           id: 'tools_manage_connections',
@@ -1721,6 +1972,276 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  Future<void> _showSchemaNodeContextMenu(
+    String nodeId,
+    Offset globalPosition,
+  ) async {
+    final items = _schemaMenuItemsForNode(nodeId);
+    if (items.isEmpty) {
+      return;
+    }
+    setState(() {
+      _selectedSchemaNodeId = nodeId;
+    });
+    final action = await showMenu<_SchemaNodeMenuAction>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        globalPosition.dx,
+        globalPosition.dy,
+      ),
+      items: items,
+    );
+    if (action == null) {
+      return;
+    }
+
+    final objectName = _objectNameForSchemaNode(nodeId);
+    switch (action) {
+      case _SchemaNodeMenuAction.viewData:
+        if (objectName != null) {
+          await _openObjectDataQuery(objectName);
+        }
+        break;
+      case _SchemaNodeMenuAction.scriptInsert:
+        if (objectName != null) {
+          _openSqlTemplate(_insertTemplateForTable(objectName));
+        }
+        break;
+      case _SchemaNodeMenuAction.scriptUpdate:
+        if (objectName != null) {
+          _openSqlTemplate(_updateTemplateForTable(objectName));
+        }
+        break;
+      case _SchemaNodeMenuAction.scriptDelete:
+        if (objectName != null) {
+          _openSqlTemplate(_deleteTemplateForTable(objectName));
+        }
+        break;
+      case _SchemaNodeMenuAction.renameObject:
+        if (objectName != null) {
+          _openSqlTemplate(
+            'ALTER TABLE ${_quoteIdentifier(objectName)}\n'
+            'RENAME TO ${_quoteIdentifier('new_$objectName')};',
+          );
+        }
+        break;
+      case _SchemaNodeMenuAction.deleteObject:
+        if (objectName != null) {
+          _openSqlTemplate('DROP TABLE ${_quoteIdentifier(objectName)};');
+        }
+        break;
+      case _SchemaNodeMenuAction.refresh:
+        await widget.controller.refreshSchema();
+        break;
+      case _SchemaNodeMenuAction.newIndex:
+        _openSqlTemplate(_newIndexTemplate());
+        break;
+      case _SchemaNodeMenuAction.rebuildAllIndexes:
+        _openSqlTemplate('REINDEX;');
+        break;
+      case _SchemaNodeMenuAction.newView:
+        _openSqlTemplate(_newViewTemplate());
+        break;
+    }
+  }
+
+  List<PopupMenuEntry<_SchemaNodeMenuAction>> _schemaMenuItemsForNode(
+    String nodeId,
+  ) {
+    if (nodeId.startsWith('table:')) {
+      return <PopupMenuEntry<_SchemaNodeMenuAction>>[
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.scriptInsert,
+          icon: Icons.note_add_outlined,
+          label: 'Script Table as INSERT',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.scriptUpdate,
+          icon: Icons.edit_note_outlined,
+          label: 'Script Table as UPDATE',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.scriptDelete,
+          icon: Icons.delete_sweep_outlined,
+          label: 'Script Table as DELETE',
+        ),
+        const PopupMenuDivider(),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.viewData,
+          icon: Icons.table_view_outlined,
+          label: 'View Data',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.renameObject,
+          icon: Icons.drive_file_rename_outline_outlined,
+          label: 'Rename',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.deleteObject,
+          icon: Icons.delete_outline,
+          label: 'Delete',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.refresh,
+          icon: Icons.refresh_outlined,
+          label: 'Refresh',
+        ),
+      ];
+    }
+    if (nodeId == 'section:indexes') {
+      return <PopupMenuEntry<_SchemaNodeMenuAction>>[
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.newIndex,
+          icon: Icons.add_circle_outline,
+          label: 'New Index',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.rebuildAllIndexes,
+          icon: Icons.build_circle_outlined,
+          label: 'Rebuild All',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.refresh,
+          icon: Icons.refresh_outlined,
+          label: 'Refresh',
+        ),
+      ];
+    }
+    if (nodeId == 'section:views') {
+      return <PopupMenuEntry<_SchemaNodeMenuAction>>[
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.newView,
+          icon: Icons.add_circle_outline,
+          label: 'New View',
+        ),
+        _popupMenuItem(
+          value: _SchemaNodeMenuAction.refresh,
+          icon: Icons.refresh_outlined,
+          label: 'Refresh',
+        ),
+      ];
+    }
+    return const <PopupMenuEntry<_SchemaNodeMenuAction>>[];
+  }
+
+  String? _objectNameForSchemaNode(String nodeId) {
+    if (nodeId.startsWith('table:')) {
+      return nodeId.substring('table:'.length);
+    }
+    if (nodeId.startsWith('view:')) {
+      return nodeId.substring('view:'.length);
+    }
+    return null;
+  }
+
+  Future<void> _openObjectDataQuery(String objectName) async {
+    _openSqlTemplate(
+      'SELECT *\n'
+      'FROM ${_quoteIdentifier(objectName)}\n'
+      'LIMIT ${widget.controller.config.defaultPageSize};',
+    );
+    if (widget.controller.hasOpenDatabase) {
+      await widget.controller.runActiveTab();
+    }
+  }
+
+  void _openSqlTemplate(String sql) {
+    _autocompleteSelectionIndex = 0;
+    widget.controller.createTab(sql: sql);
+  }
+
+  String _insertTemplateForTable(String tableName) {
+    final object = widget.controller.schema.objectNamed(tableName);
+    final columns = object?.columns ?? const <SchemaColumn>[];
+    if (columns.isEmpty) {
+      return 'INSERT INTO ${_quoteIdentifier(tableName)} ()\nVALUES ();';
+    }
+    final quotedColumns = columns
+        .map((column) => _quoteIdentifier(column.name))
+        .join(', ');
+    final values = <String>[
+      for (var index = 0; index < columns.length; index++) '\$${index + 1}',
+    ].join(', ');
+    return 'INSERT INTO ${_quoteIdentifier(tableName)} (\n'
+        '  $quotedColumns\n'
+        ')\n'
+        'VALUES (\n'
+        '  $values\n'
+        ');';
+  }
+
+  String _updateTemplateForTable(String tableName) {
+    final object = widget.controller.schema.objectNamed(tableName);
+    final columns = object?.columns ?? const <SchemaColumn>[];
+    final keyColumn =
+        _firstOrNull(columns.where((column) => column.primaryKey)) ??
+        (columns.isEmpty ? null : columns.first);
+    final valueColumns = columns
+        .where((column) => column != keyColumn)
+        .toList();
+    final setters = valueColumns.isEmpty
+        ? '  ${_quoteIdentifier('column_name')} = \$1'
+        : <String>[
+            for (var index = 0; index < valueColumns.length; index++)
+              '  ${_quoteIdentifier(valueColumns[index].name)} = \$${index + 1}',
+          ].join(',\n');
+    final whereValue = valueColumns.length + 1;
+    final whereClause = keyColumn == null
+        ? 'WHERE ${_quoteIdentifier('key_column')} = \$$whereValue;'
+        : 'WHERE ${_quoteIdentifier(keyColumn.name)} = \$$whereValue;';
+    return 'UPDATE ${_quoteIdentifier(tableName)}\n'
+        'SET\n'
+        '$setters\n'
+        '$whereClause';
+  }
+
+  String _deleteTemplateForTable(String tableName) {
+    final object = widget.controller.schema.objectNamed(tableName);
+    final keyColumn = object == null
+        ? null
+        : _firstOrNull(object.columns.where((column) => column.primaryKey)) ??
+              (object.columns.isEmpty ? null : object.columns.first);
+    final whereClause = keyColumn == null
+        ? 'WHERE ${_quoteIdentifier('key_column')} = \$1;'
+        : 'WHERE ${_quoteIdentifier(keyColumn.name)} = \$1;';
+    return 'DELETE FROM ${_quoteIdentifier(tableName)}\n$whereClause';
+  }
+
+  String _newIndexTemplate() {
+    final firstTable = _firstOrNull(widget.controller.schema.tables);
+    final table = firstTable?.name ?? 'table_name';
+    final column = firstTable == null || firstTable.columns.isEmpty
+        ? 'column_name'
+        : firstTable.columns.first.name;
+    return 'CREATE INDEX ${_quoteIdentifier('idx_${table}_$column')}\n'
+        'ON ${_quoteIdentifier(table)} (${_quoteIdentifier(column)});';
+  }
+
+  String _newViewTemplate() {
+    final table =
+        _firstOrNull(widget.controller.schema.tables)?.name ?? 'table_name';
+    return 'CREATE VIEW ${_quoteIdentifier('new_view')}\n'
+        'AS\n'
+        'SELECT *\n'
+        'FROM ${_quoteIdentifier(table)}\n'
+        'LIMIT ${widget.controller.config.defaultPageSize};';
+  }
+
+  String _quoteIdentifier(String value) {
+    return '"${value.replaceAll('"', '""')}"';
+  }
+
+  T? _firstOrNull<T>(Iterable<T> values) {
+    final iterator = values.iterator;
+    return iterator.moveNext() ? iterator.current : null;
+  }
+
+  bool _usePlaceholderContent(WorkspaceController controller) {
+    return !controller.hasOpenDatabase;
+  }
+
   void _formatActiveSql() {
     final formatted = _sqlFormatter.format(
       _sqlController.text,
@@ -1734,6 +2255,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _insertSnippet(SqlSnippet snippet) {
+    _autocompleteSelectionIndex = 0;
     final text = _sqlController.text;
     final selection = _sqlController.selection;
     final start = selection.isValid ? selection.start : text.length;
@@ -1753,6 +2275,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     AutocompleteResult result,
     AutocompleteSuggestion suggestion,
   ) {
+    _autocompleteSelectionIndex = 0;
     final current = _sqlController.text;
     final updated =
         current.substring(0, result.replaceStart) +
@@ -1764,44 +2287,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       selection: TextSelection.collapsed(offset: offset),
     );
     widget.controller.updateActiveSql(updated);
-  }
-
-  Future<void> _showSnippetBrowser() {
-    final snippets = widget.controller.config.snippets;
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('SQL Snippets'),
-          content: SizedBox(
-            width: 620,
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: snippets.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final snippet = snippets[index];
-                return ListTile(
-                  title: Text(snippet.name),
-                  subtitle: Text(snippet.description),
-                  trailing: Text(snippet.trigger),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _insertSnippet(snippet);
-                  },
-                );
-              },
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<void> _showQueryHistoryDialog() {
@@ -1932,11 +2417,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Future<void> _showPreferencesDialog() {
-    return _showPreferencesDialogInternal();
+  Future<void> _showPreferencesDialog({
+    PreferencesDialogSection initialSection = PreferencesDialogSection.general,
+  }) {
+    return _showPreferencesDialogInternal(initialSection: initialSection);
   }
 
-  Future<void> _showPreferencesDialogInternal() async {
+  Future<void> _showPreferencesDialogInternal({
+    PreferencesDialogSection initialSection = PreferencesDialogSection.general,
+  }) async {
     await _shellController.persistNow();
     await widget.controller.reloadConfig();
     _shellController.replacePreferences(
@@ -1954,6 +2443,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           configFilePath: widget.controller.configFilePath,
           shortcutConfigService: _shortcutConfigService,
           createSnippetId: widget.controller.createSnippetId,
+          initialSection: initialSection,
           onSave: (config) async {
             final saved = await widget.controller.applyAppConfig(
               config,
@@ -2001,6 +2491,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           ],
         );
       },
+    );
+  }
+
+  PopupMenuItem<T> _popupMenuItem<T>({
+    required T value,
+    required IconData icon,
+    required String label,
+    bool enabled = true,
+  }) {
+    return PopupMenuItem<T>(
+      value: value,
+      enabled: enabled,
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+          Text(label),
+        ],
+      ),
     );
   }
 }
@@ -2065,4 +2574,19 @@ class _EditableFieldBinding {
   final FocusNode focusNode;
   final UndoHistoryController? undoController;
   final ValueChanged<String> onChanged;
+}
+
+enum _ResultsCellMenuAction { copy, paste, setNull }
+
+enum _SchemaNodeMenuAction {
+  scriptInsert,
+  scriptUpdate,
+  scriptDelete,
+  viewData,
+  renameObject,
+  deleteObject,
+  refresh,
+  newIndex,
+  rebuildAllIndexes,
+  newView,
 }

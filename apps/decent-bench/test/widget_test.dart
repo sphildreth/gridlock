@@ -56,6 +56,11 @@ void main() {
       find.widgetWithText(OutlinedButton, 'New Query Tab'),
       findsOneWidget,
     );
+    expect(find.widgetWithText(OutlinedButton, 'Manage'), findsNothing);
+
+    await tester.tap(find.text('Tools'));
+    await tester.pumpAndSettle();
+    expect(find.text('Manage Snippets'), findsOneWidget);
   });
 
   testWidgets('loads shortcut labels from TOML-backed config into the menu', (
@@ -219,8 +224,10 @@ void main() {
                   onResultsTabChanged: (_) {},
                   onLoadNextPage: () {},
                   onSelectCell: (_, _) {},
+                  onShowCellMenu: (_, _, _) {},
                   onSelectRow: (_) {},
                   onTogglePinnedColumn: (_) {},
+                  usePlaceholderContent: false,
                 ),
               ),
             ),

@@ -149,6 +149,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> openDatabase(
     String rawPath, {
     required bool createIfMissing,
+    bool restoreStartupQuery = false,
   }) async {
     final normalized = rawPath.trim();
     if (normalized.isEmpty) {
@@ -196,6 +197,9 @@ class WorkspaceController extends ChangeNotifier {
       final restoredState = await _workspaceStateStore.load(session.path);
       _restoreTabs(restoredState, notify: false);
       await refreshSchema(showLoadingState: false);
+      if (restoreStartupQuery) {
+        await _restoreStartupQueryState();
+      }
       await _persistWorkspaceStateNow();
       workspaceMessage =
           'Opened ${p.basename(session.path)}'
@@ -267,7 +271,11 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
 
-    await openDatabase(lastOpenedPath, createIfMissing: false);
+    await openDatabase(
+      lastOpenedPath,
+      createIfMissing: false,
+      restoreStartupQuery: true,
+    );
   }
 
   void updateActiveExportPath(String value) {
@@ -305,10 +313,20 @@ class WorkspaceController extends ChangeNotifier {
     QueryHistoryEntry entry, {
     bool openInNewTab = false,
   }) {
+    loadHistoryEntryIntoTab(activeTabId, entry, openInNewTab: openInNewTab);
+  }
+
+  void loadHistoryEntryIntoTab(
+    String tabId,
+    QueryHistoryEntry entry, {
+    bool openInNewTab = false,
+  }) {
     if (openInNewTab) {
       createTab(sql: entry.sql);
+      tabId = activeTabId;
     }
-    _mutateActiveTab(
+    _mutateTab(
+      tabId,
       (tab) => tab.copyWith(sql: entry.sql, parameterJson: entry.parameterJson),
       persist: true,
     );
@@ -2696,6 +2714,47 @@ class WorkspaceController extends ChangeNotifier {
 
   String _newTabTitle() => 'Query ${_nextTabTitleCounter++}';
 
+  Future<void> _restoreStartupQueryState() async {
+    final replay = _latestRestorableQuery();
+    if (replay != null) {
+      _activeTabId = replay.tabId;
+      loadHistoryEntryIntoTab(replay.tabId, replay.entry);
+      await runTab(replay.tabId);
+      return;
+    }
+
+    final firstTable = schema.tables.isEmpty ? null : schema.tables.first.name;
+    if (firstTable == null) {
+      return;
+    }
+    final fallbackSql =
+        'SELECT *\n'
+        'FROM ${_quoteIdentifier(firstTable)}\n'
+        'LIMIT ${config.defaultPageSize};';
+    _mutateActiveTab(
+      (tab) => tab.copyWith(sql: fallbackSql, parameterJson: ''),
+      persist: true,
+    );
+    await runActiveTab();
+  }
+
+  _RestoredQueryReplay? _latestRestorableQuery() {
+    _RestoredQueryReplay? latest;
+    for (final tab in tabs) {
+      for (final entry in tab.queryHistory) {
+        if (entry.outcome != QueryHistoryOutcome.completed) {
+          continue;
+        }
+        final candidate = _RestoredQueryReplay(tabId: tab.id, entry: entry);
+        if (latest == null ||
+            candidate.entry.ranAt.isAfter(latest.entry.ranAt)) {
+          latest = candidate;
+        }
+      }
+    }
+    return latest;
+  }
+
   void _scheduleWorkspaceStateSave() {
     final currentDatabasePath = databasePath;
     if (currentDatabasePath == null) {
@@ -2774,4 +2833,11 @@ class WorkspaceController extends ChangeNotifier {
       notifyListeners();
     }
   }
+}
+
+class _RestoredQueryReplay {
+  const _RestoredQueryReplay({required this.tabId, required this.entry});
+
+  final String tabId;
+  final QueryHistoryEntry entry;
 }

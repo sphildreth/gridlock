@@ -78,6 +78,7 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
 
   int cancelCount = 0;
   String? lastExportPath;
+  String? lastRunQuerySql;
   ExcelImportInspection excelInspection;
   SqlDumpImportInspection sqlDumpInspection;
   SqliteImportInspection sqliteInspection;
@@ -562,6 +563,7 @@ class FakeWorkspaceGateway implements WorkspaceDatabaseGateway {
     required List<Object?> params,
     required int pageSize,
   }) async {
+    lastRunQuerySql = sql;
     if (sql.toUpperCase().startsWith('EXPLAIN')) {
       if (sql.toLowerCase().contains('projects')) {
         return QueryResultPage(

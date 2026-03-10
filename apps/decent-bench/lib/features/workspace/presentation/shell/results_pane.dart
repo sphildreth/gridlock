@@ -14,6 +14,26 @@ class ResultsGridCellSelection {
 
   final int rowIndex;
   final String columnName;
+
+  ResultsGridCellKey get key =>
+      ResultsGridCellKey(rowIndex: rowIndex, columnName: columnName);
+}
+
+class ResultsGridCellKey {
+  const ResultsGridCellKey({required this.rowIndex, required this.columnName});
+
+  final int rowIndex;
+  final String columnName;
+
+  @override
+  bool operator ==(Object other) {
+    return other is ResultsGridCellKey &&
+        other.rowIndex == rowIndex &&
+        other.columnName == columnName;
+  }
+
+  @override
+  int get hashCode => Object.hash(rowIndex, columnName);
 }
 
 class ResultsGridInteractionState {
@@ -21,16 +41,22 @@ class ResultsGridInteractionState {
     this.selectedRows = const <int>{},
     this.selectedCell,
     this.pinnedColumns = const <String>{},
+    this.cellOverrides = const <ResultsGridCellKey, Object?>{},
+    this.executionGeneration = 0,
   });
 
   final Set<int> selectedRows;
   final ResultsGridCellSelection? selectedCell;
   final Set<String> pinnedColumns;
+  final Map<ResultsGridCellKey, Object?> cellOverrides;
+  final int executionGeneration;
 
   ResultsGridInteractionState copyWith({
     Set<int>? selectedRows,
     Object? selectedCell = _unset,
     Set<String>? pinnedColumns,
+    Map<ResultsGridCellKey, Object?>? cellOverrides,
+    int? executionGeneration,
   }) {
     return ResultsGridInteractionState(
       selectedRows: selectedRows ?? this.selectedRows,
@@ -38,22 +64,36 @@ class ResultsGridInteractionState {
           ? this.selectedCell
           : selectedCell as ResultsGridCellSelection?,
       pinnedColumns: pinnedColumns ?? this.pinnedColumns,
+      cellOverrides: cellOverrides ?? this.cellOverrides,
+      executionGeneration: executionGeneration ?? this.executionGeneration,
     );
   }
 
   static const Object _unset = Object();
 }
 
-List<String> resolveResultsColumns(QueryTabState tab) {
+List<String> resolveResultsColumns(
+  QueryTabState tab, {
+  bool usePlaceholderContent = true,
+}) {
   if (tab.resultColumns.isNotEmpty) {
     return tab.resultColumns;
+  }
+  if (!usePlaceholderContent) {
+    return const <String>[];
   }
   return const <String>['id', 'name', 'region', 'total'];
 }
 
-List<Map<String, Object?>> resolveResultsRows(QueryTabState tab) {
+List<Map<String, Object?>> resolveResultsRows(
+  QueryTabState tab, {
+  bool usePlaceholderContent = true,
+}) {
   if (tab.resultRows.isNotEmpty) {
     return tab.resultRows;
+  }
+  if (!usePlaceholderContent) {
+    return const <Map<String, Object?>>[];
   }
   return const <Map<String, Object?>>[
     <String, Object?>{
@@ -77,6 +117,27 @@ List<Map<String, Object?>> resolveResultsRows(QueryTabState tab) {
   ];
 }
 
+Object? resolveResultsCellValue(
+  QueryTabState tab,
+  ResultsGridInteractionState state,
+  int rowIndex,
+  String columnName, {
+  bool usePlaceholderContent = true,
+}) {
+  final key = ResultsGridCellKey(rowIndex: rowIndex, columnName: columnName);
+  if (state.cellOverrides.containsKey(key)) {
+    return state.cellOverrides[key];
+  }
+  final rows = resolveResultsRows(
+    tab,
+    usePlaceholderContent: usePlaceholderContent,
+  );
+  if (rowIndex < 0 || rowIndex >= rows.length) {
+    return null;
+  }
+  return rows[rowIndex][columnName];
+}
+
 class ResultsPane extends StatelessWidget {
   const ResultsPane({
     super.key,
@@ -88,8 +149,10 @@ class ResultsPane extends StatelessWidget {
     required this.onResultsTabChanged,
     required this.onLoadNextPage,
     required this.onSelectCell,
+    required this.onShowCellMenu,
     required this.onSelectRow,
     required this.onTogglePinnedColumn,
+    required this.usePlaceholderContent,
   });
 
   final QueryTabState activeTab;
@@ -100,8 +163,11 @@ class ResultsPane extends StatelessWidget {
   final ValueChanged<ResultsPaneTab> onResultsTabChanged;
   final VoidCallback onLoadNextPage;
   final void Function(int rowIndex, String columnName) onSelectCell;
+  final void Function(int rowIndex, String columnName, Offset globalPosition)
+  onShowCellMenu;
   final ValueChanged<int> onSelectRow;
   final ValueChanged<String> onTogglePinnedColumn;
+  final bool usePlaceholderContent;
 
   @override
   Widget build(BuildContext context) {
@@ -130,8 +196,10 @@ class ResultsPane extends StatelessWidget {
                 horizontalScrollController: horizontalScrollController,
                 onLoadNextPage: onLoadNextPage,
                 onSelectCell: onSelectCell,
+                onShowCellMenu: onShowCellMenu,
                 onSelectRow: onSelectRow,
                 onTogglePinnedColumn: onTogglePinnedColumn,
+                usePlaceholderContent: usePlaceholderContent,
               ),
               ResultsPaneTab.messages => _MessagesPanel(tab: activeTab),
               ResultsPaneTab.executionPlan => _ExecutionPlanPanel(
@@ -279,8 +347,10 @@ class _ResultsGrid extends StatefulWidget {
     required this.horizontalScrollController,
     required this.onLoadNextPage,
     required this.onSelectCell,
+    required this.onShowCellMenu,
     required this.onSelectRow,
     required this.onTogglePinnedColumn,
+    required this.usePlaceholderContent,
   });
 
   final QueryTabState tab;
@@ -289,8 +359,11 @@ class _ResultsGrid extends StatefulWidget {
   final ScrollController horizontalScrollController;
   final VoidCallback onLoadNextPage;
   final void Function(int rowIndex, String columnName) onSelectCell;
+  final void Function(int rowIndex, String columnName, Offset globalPosition)
+  onShowCellMenu;
   final ValueChanged<int> onSelectRow;
   final ValueChanged<String> onTogglePinnedColumn;
+  final bool usePlaceholderContent;
 
   @override
   State<_ResultsGrid> createState() => _ResultsGridState();
@@ -331,8 +404,14 @@ class _ResultsGridState extends State<_ResultsGrid> {
 
   @override
   Widget build(BuildContext context) {
-    final columns = resolveResultsColumns(widget.tab);
-    final rows = resolveResultsRows(widget.tab);
+    final columns = resolveResultsColumns(
+      widget.tab,
+      usePlaceholderContent: widget.usePlaceholderContent,
+    );
+    final rows = resolveResultsRows(
+      widget.tab,
+      usePlaceholderContent: widget.usePlaceholderContent,
+    );
     final pinnedColumns = <String>[
       for (final column in columns)
         if (widget.interactionState.pinnedColumns.contains(column)) column,
@@ -354,6 +433,13 @@ class _ResultsGridState extends State<_ResultsGrid> {
           scrollableWidth,
           remainingColumns.length * _columnWidth,
         );
+
+        if (columns.isEmpty && rows.isEmpty) {
+          return _ResultsEmptyState(
+            tab: widget.tab,
+            usePlaceholderContent: widget.usePlaceholderContent,
+          );
+        }
 
         return Column(
           children: <Widget>[
@@ -391,7 +477,6 @@ class _ResultsGridState extends State<_ResultsGrid> {
                             itemExtent: _rowHeight,
                             itemCount: rows.length,
                             itemBuilder: (context, index) {
-                              final row = rows[index];
                               final rowSelected = widget
                                   .interactionState
                                   .selectedRows
@@ -406,13 +491,29 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                   ),
                                   for (final column in pinnedColumns)
                                     _GridCell(
-                                      text: formatCellValue(row[column]),
+                                      text: formatCellValue(
+                                        resolveResultsCellValue(
+                                          widget.tab,
+                                          widget.interactionState,
+                                          index,
+                                          column,
+                                          usePlaceholderContent:
+                                              widget.usePlaceholderContent,
+                                        ),
+                                      ),
                                       width: _columnWidth,
                                       pinned: true,
                                       selected: _isCellSelected(index, column),
                                       rowSelected: rowSelected,
+                                      edited: _isCellEdited(index, column),
                                       onTap: () =>
                                           widget.onSelectCell(index, column),
+                                      onSecondaryTapDown: (position) =>
+                                          widget.onShowCellMenu(
+                                            index,
+                                            column,
+                                            position,
+                                          ),
                                     ),
                                 ],
                               );
@@ -455,7 +556,6 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                   itemExtent: _rowHeight,
                                   itemCount: rows.length,
                                   itemBuilder: (context, index) {
-                                    final row = rows[index];
                                     final rowSelected = widget
                                         .interactionState
                                         .selectedRows
@@ -464,17 +564,36 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                       children: <Widget>[
                                         for (final column in remainingColumns)
                                           _GridCell(
-                                            text: formatCellValue(row[column]),
+                                            text: formatCellValue(
+                                              resolveResultsCellValue(
+                                                widget.tab,
+                                                widget.interactionState,
+                                                index,
+                                                column,
+                                                usePlaceholderContent: widget
+                                                    .usePlaceholderContent,
+                                              ),
+                                            ),
                                             width: _columnWidth,
                                             selected: _isCellSelected(
                                               index,
                                               column,
                                             ),
                                             rowSelected: rowSelected,
+                                            edited: _isCellEdited(
+                                              index,
+                                              column,
+                                            ),
                                             onTap: () => widget.onSelectCell(
                                               index,
                                               column,
                                             ),
+                                            onSecondaryTapDown: (position) =>
+                                                widget.onShowCellMenu(
+                                                  index,
+                                                  column,
+                                                  position,
+                                                ),
                                           ),
                                       ],
                                     );
@@ -519,6 +638,12 @@ class _ResultsGridState extends State<_ResultsGrid> {
         cell.columnName == columnName;
   }
 
+  bool _isCellEdited(int rowIndex, String columnName) {
+    return widget.interactionState.cellOverrides.containsKey(
+      ResultsGridCellKey(rowIndex: rowIndex, columnName: columnName),
+    );
+  }
+
   void _syncFromScrollable() {
     if (_syncingVertical ||
         !widget.verticalScrollController.hasClients ||
@@ -559,8 +684,10 @@ class _GridCell extends StatelessWidget {
     this.isHeader = false,
     this.selected = false,
     this.rowSelected = false,
+    this.edited = false,
     this.pinned = false,
     this.onTap,
+    this.onSecondaryTapDown,
     this.onPinToggle,
   });
 
@@ -569,8 +696,10 @@ class _GridCell extends StatelessWidget {
   final bool isHeader;
   final bool selected;
   final bool rowSelected;
+  final bool edited;
   final bool pinned;
   final VoidCallback? onTap;
+  final ValueChanged<Offset>? onSecondaryTapDown;
   final VoidCallback? onPinToggle;
 
   @override
@@ -580,6 +709,8 @@ class _GridCell extends StatelessWidget {
         ? theme.colorScheme.surfaceContainerHighest
         : selected
         ? theme.colorScheme.secondaryContainer
+        : edited
+        ? const Color(0xFFFFF3D6)
         : rowSelected
         ? theme.colorScheme.surfaceContainerLow
         : theme.colorScheme.surface;
@@ -634,7 +765,13 @@ class _GridCell extends StatelessWidget {
     if (isHeader || onTap == null) {
       return child;
     }
-    return InkWell(onTap: onTap, child: child);
+    return InkWell(
+      onTap: onTap,
+      onSecondaryTapDown: onSecondaryTapDown == null
+          ? null
+          : (details) => onSecondaryTapDown!(details.globalPosition),
+      child: child,
+    );
   }
 }
 
@@ -683,6 +820,52 @@ class _RowHeaderCell extends StatelessWidget {
       return child;
     }
     return InkWell(onTap: onTap, child: child);
+  }
+}
+
+class _ResultsEmptyState extends StatelessWidget {
+  const _ResultsEmptyState({
+    required this.tab,
+    required this.usePlaceholderContent,
+  });
+
+  final QueryTabState tab;
+  final bool usePlaceholderContent;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = usePlaceholderContent
+        ? 'Run a query to replace the demo dataset.'
+        : tab.rowsAffected != null
+        ? 'Statement completed without a result grid.'
+        : tab.lastSql != null
+        ? 'Query returned no rows.'
+        : 'Run a query to populate the results grid.';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.table_rows_outlined, size: 28),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            if (tab.statusMessage != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                tab.statusMessage!,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

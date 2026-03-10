@@ -11,6 +11,7 @@ class SchemaExplorerPane extends StatefulWidget {
     required this.databasePath,
     required this.selectedNodeId,
     required this.onSelectNode,
+    required this.onShowNodeMenu,
     required this.onRefresh,
     required this.isLoading,
   });
@@ -19,6 +20,7 @@ class SchemaExplorerPane extends StatefulWidget {
   final String? databasePath;
   final String? selectedNodeId;
   final ValueChanged<String> onSelectNode;
+  final void Function(String nodeId, Offset globalPosition) onShowNodeMenu;
   final VoidCallback onRefresh;
   final bool isLoading;
 
@@ -74,6 +76,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   selected: widget.selectedNodeId == 'section:tables',
                   expanded: _expandedNodes.contains('section:tables'),
                   onSelected: widget.onSelectNode,
+                  onShowContextMenu: widget.onShowNodeMenu,
                   onExpansionChanged: _setExpanded,
                   children: schema.tables.isEmpty
                       ? _buildSampleTableNodes()
@@ -86,6 +89,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                               selectedNodeId: widget.selectedNodeId,
                               expandedNodes: _expandedNodes,
                               onSelectNode: widget.onSelectNode,
+                              onShowContextMenu: widget.onShowNodeMenu,
                               onExpansionChanged: _setExpanded,
                               children: _buildObjectChildren(
                                 object: object,
@@ -107,6 +111,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   selected: widget.selectedNodeId == 'section:views',
                   expanded: _expandedNodes.contains('section:views'),
                   onSelected: widget.onSelectNode,
+                  onShowContextMenu: widget.onShowNodeMenu,
                   onExpansionChanged: _setExpanded,
                   children: schema.views.isEmpty
                       ? _buildSampleViewNodes()
@@ -119,6 +124,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                               selectedNodeId: widget.selectedNodeId,
                               expandedNodes: _expandedNodes,
                               onSelectNode: widget.onSelectNode,
+                              onShowContextMenu: widget.onShowNodeMenu,
                               onExpansionChanged: _setExpanded,
                               children: _buildObjectChildren(
                                 object: object,
@@ -142,6 +148,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   selected: widget.selectedNodeId == 'section:indexes',
                   expanded: _expandedNodes.contains('section:indexes'),
                   onSelected: widget.onSelectNode,
+                  onShowContextMenu: widget.onShowNodeMenu,
                   onExpansionChanged: _setExpanded,
                   children: schema.indexes.isEmpty
                       ? <Widget>[
@@ -189,6 +196,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
         selectedNodeId: widget.selectedNodeId,
         expandedNodes: _expandedNodes,
         onSelectNode: widget.onSelectNode,
+        onShowContextMenu: widget.onShowNodeMenu,
         onExpansionChanged: _setExpanded,
         children: <Widget>[
           for (final column in object.columns)
@@ -210,6 +218,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
         selectedNodeId: widget.selectedNodeId,
         expandedNodes: _expandedNodes,
         onSelectNode: widget.onSelectNode,
+        onShowContextMenu: widget.onShowNodeMenu,
         onExpansionChanged: _setExpanded,
         children: relatedIndexes.isEmpty
             ? <Widget>[
@@ -244,6 +253,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
           selectedNodeId: widget.selectedNodeId,
           expandedNodes: _expandedNodes,
           onSelectNode: widget.onSelectNode,
+          onShowContextMenu: widget.onShowNodeMenu,
           onExpansionChanged: _setExpanded,
           children: _buildConstraintNodes(object),
         ),
@@ -259,6 +269,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
           selectedNodeId: widget.selectedNodeId,
           expandedNodes: _expandedNodes,
           onSelectNode: widget.onSelectNode,
+          onShowContextMenu: widget.onShowNodeMenu,
           onExpansionChanged: _setExpanded,
           children: <Widget>[
             _LeafNode(
@@ -318,6 +329,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
         selectedNodeId: widget.selectedNodeId,
         expandedNodes: _expandedNodes,
         onSelectNode: widget.onSelectNode,
+        onShowContextMenu: widget.onShowNodeMenu,
         onExpansionChanged: _setExpanded,
         children: <Widget>[
           _FolderBranch(
@@ -327,6 +339,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
             selectedNodeId: widget.selectedNodeId,
             expandedNodes: _expandedNodes,
             onSelectNode: widget.onSelectNode,
+            onShowContextMenu: widget.onShowNodeMenu,
             onExpansionChanged: _setExpanded,
             children: const <Widget>[
               _LeafNode(
@@ -355,6 +368,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
         selectedNodeId: widget.selectedNodeId,
         expandedNodes: _expandedNodes,
         onSelectNode: widget.onSelectNode,
+        onShowContextMenu: widget.onShowNodeMenu,
         onExpansionChanged: _setExpanded,
         children: <Widget>[
           _FolderBranch(
@@ -364,6 +378,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
             selectedNodeId: widget.selectedNodeId,
             expandedNodes: _expandedNodes,
             onSelectNode: widget.onSelectNode,
+            onShowContextMenu: widget.onShowNodeMenu,
             onExpansionChanged: _setExpanded,
             children: const <Widget>[
               _LeafNode(
@@ -397,6 +412,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
         selectedNodeId: widget.selectedNodeId,
         expandedNodes: _expandedNodes,
         onSelectNode: widget.onSelectNode,
+        onShowContextMenu: widget.onShowNodeMenu,
         onExpansionChanged: _setExpanded,
         children: <Widget>[
           _FolderBranch(
@@ -406,6 +422,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
             selectedNodeId: widget.selectedNodeId,
             expandedNodes: _expandedNodes,
             onSelectNode: widget.onSelectNode,
+            onShowContextMenu: widget.onShowNodeMenu,
             onExpansionChanged: _setExpanded,
             children: const <Widget>[
               _LeafNode(
@@ -488,6 +505,7 @@ class _SectionBranch extends StatelessWidget {
     required this.selected,
     required this.expanded,
     required this.onSelected,
+    required this.onShowContextMenu,
     required this.onExpansionChanged,
     required this.children,
   });
@@ -499,6 +517,7 @@ class _SectionBranch extends StatelessWidget {
   final bool selected;
   final bool expanded;
   final ValueChanged<String> onSelected;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
   final void Function(String nodeId, bool expanded) onExpansionChanged;
   final List<Widget> children;
 
@@ -519,6 +538,8 @@ class _SectionBranch extends StatelessWidget {
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => onSelected(nodeId),
+          onSecondaryTapDown: (details) =>
+              onShowContextMenu(nodeId, details.globalPosition),
           child: Row(
             children: <Widget>[
               Expanded(
@@ -548,6 +569,7 @@ class _ObjectBranch extends StatelessWidget {
     required this.selectedNodeId,
     required this.expandedNodes,
     required this.onSelectNode,
+    required this.onShowContextMenu,
     required this.onExpansionChanged,
     required this.children,
   });
@@ -558,6 +580,7 @@ class _ObjectBranch extends StatelessWidget {
   final String? selectedNodeId;
   final Set<String> expandedNodes;
   final ValueChanged<String> onSelectNode;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
   final void Function(String nodeId, bool expanded) onExpansionChanged;
   final List<Widget> children;
 
@@ -570,6 +593,7 @@ class _ObjectBranch extends StatelessWidget {
       selectedNodeId: selectedNodeId,
       expandedNodes: expandedNodes,
       onSelectNode: onSelectNode,
+      onShowContextMenu: onShowContextMenu,
       onExpansionChanged: onExpansionChanged,
       children: children,
     );
@@ -584,6 +608,7 @@ class _FolderBranch extends StatelessWidget {
     required this.selectedNodeId,
     required this.expandedNodes,
     required this.onSelectNode,
+    required this.onShowContextMenu,
     required this.onExpansionChanged,
     required this.children,
   });
@@ -594,6 +619,7 @@ class _FolderBranch extends StatelessWidget {
   final String? selectedNodeId;
   final Set<String> expandedNodes;
   final ValueChanged<String> onSelectNode;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
   final void Function(String nodeId, bool expanded) onExpansionChanged;
   final List<Widget> children;
 
@@ -606,6 +632,7 @@ class _FolderBranch extends StatelessWidget {
       selectedNodeId: selectedNodeId,
       expandedNodes: expandedNodes,
       onSelectNode: onSelectNode,
+      onShowContextMenu: onShowContextMenu,
       onExpansionChanged: onExpansionChanged,
       inset: 10,
       children: children,
@@ -621,6 +648,7 @@ class _BranchNode extends StatelessWidget {
     required this.selectedNodeId,
     required this.expandedNodes,
     required this.onSelectNode,
+    required this.onShowContextMenu,
     required this.onExpansionChanged,
     required this.children,
     this.inset = 0,
@@ -632,6 +660,7 @@ class _BranchNode extends StatelessWidget {
   final String? selectedNodeId;
   final Set<String> expandedNodes;
   final ValueChanged<String> onSelectNode;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
   final void Function(String nodeId, bool expanded) onExpansionChanged;
   final List<Widget> children;
   final double inset;
@@ -654,6 +683,8 @@ class _BranchNode extends StatelessWidget {
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => onSelectNode(nodeId),
+          onSecondaryTapDown: (details) =>
+              onShowContextMenu(nodeId, details.globalPosition),
           child: Text(
             label,
             style: theme.textTheme.bodyMedium?.copyWith(

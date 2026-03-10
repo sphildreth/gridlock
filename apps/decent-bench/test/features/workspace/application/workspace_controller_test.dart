@@ -6,6 +6,7 @@ import 'package:decent_bench/features/workspace/domain/excel_import_models.dart'
 import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
+import 'package:decent_bench/features/workspace/domain/workspace_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../../support/fakes.dart';
@@ -55,6 +56,172 @@ void main() {
       expect(controller.engineVersion, '1.6.1');
       expect(controller.schema.tables.single.name, 'tasks');
       expect(controller.workspaceError, isNull);
+    },
+  );
+
+  test(
+    'initialize reruns the most recent saved query when reopening the last workspace',
+    () async {
+      final dbPath =
+          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final file = File(dbPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString('');
+
+      addTearDown(() async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      });
+
+      final config = AppConfig.defaults().copyWith(
+        recentFiles: <String>[dbPath],
+      );
+      final workspaceStateStore = InMemoryWorkspaceStateStore();
+      await workspaceStateStore.save(
+        dbPath,
+        PersistedWorkspaceState(
+          schemaVersion: PersistedWorkspaceState.currentSchemaVersion,
+          activeTabId: 'query-tab-1',
+          tabs: <WorkspaceTabDraft>[
+            WorkspaceTabDraft(
+              id: 'query-tab-1',
+              title: 'Query 1',
+              sql: 'SELECT 1;',
+              parameterJson: '',
+              exportPath: '',
+              queryHistory: <QueryHistoryEntry>[
+                QueryHistoryEntry(
+                  sql: 'SELECT id, title FROM tasks ORDER BY id',
+                  parameterJson: '',
+                  ranAt: DateTime(2026, 3, 10, 9, 30),
+                  outcome: QueryHistoryOutcome.completed,
+                  elapsed: const Duration(milliseconds: 12),
+                  rowsLoaded: 2,
+                  rowsAffected: null,
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(config),
+        workspaceStateStore: workspaceStateStore,
+      );
+
+      await controller.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.databasePath, dbPath);
+      expect(
+        controller.activeTab.sql,
+        'SELECT id, title FROM tasks ORDER BY id',
+      );
+      expect(controller.activeTab.resultRows.single['title'], 'Ship phase 1');
+      expect(controller.activeTab.phase, QueryPhase.completed);
+    },
+  );
+
+  test(
+    'initialize runs a first-table preview query when reopening a workspace without query history',
+    () async {
+      final dbPath =
+          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final file = File(dbPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString('');
+
+      addTearDown(() async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      });
+
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(
+          AppConfig.defaults().copyWith(recentFiles: <String>[dbPath]),
+        ),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+
+      await controller.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.databasePath, dbPath);
+      expect(controller.activeTab.sql, startsWith('SELECT *'));
+      expect(controller.activeTab.sql, contains('FROM "tasks"'));
+      expect(controller.activeTab.resultRows.single['title'], 'Ship phase 1');
+      expect(controller.activeTab.executionPlan.isLoading, isFalse);
+      expect(
+        controller.activeTab.executionPlan.rows.single['query_plan'],
+        contains('SCAN tasks'),
+      );
+    },
+  );
+
+  test(
+    'initialize ignores failed history entries and falls back to a preview query',
+    () async {
+      final dbPath =
+          '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+      final file = File(dbPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString('');
+
+      addTearDown(() async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      });
+
+      final workspaceStateStore = InMemoryWorkspaceStateStore();
+      await workspaceStateStore.save(
+        dbPath,
+        PersistedWorkspaceState(
+          schemaVersion: PersistedWorkspaceState.currentSchemaVersion,
+          activeTabId: 'query-tab-1',
+          tabs: <WorkspaceTabDraft>[
+            WorkspaceTabDraft(
+              id: 'query-tab-1',
+              title: 'Query 1',
+              sql: 'ANALYZE albums;',
+              parameterJson: '',
+              exportPath: '',
+              queryHistory: <QueryHistoryEntry>[
+                QueryHistoryEntry(
+                  sql: 'ANALYZE albums;',
+                  parameterJson: '',
+                  ranAt: DateTime(2026, 3, 10, 17, 34),
+                  outcome: QueryHistoryOutcome.failed,
+                  elapsed: Duration.zero,
+                  rowsLoaded: 0,
+                  rowsAffected: null,
+                  errorMessage: 'syntax error near albums',
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(
+          AppConfig.defaults().copyWith(recentFiles: <String>[dbPath]),
+        ),
+        workspaceStateStore: workspaceStateStore,
+      );
+
+      await controller.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.activeTab.sql, startsWith('SELECT *'));
+      expect(controller.activeTab.sql, contains('FROM "tasks"'));
+      expect(controller.activeTab.phase, QueryPhase.completed);
+      expect(controller.activeTab.resultRows.single['title'], 'Ship phase 1');
     },
   );
 
@@ -240,6 +407,9 @@ void main() {
     firstController.updateActiveSql('SELECT * FROM projects ORDER BY id');
     firstController.updateActiveExportPath('/tmp/projects.csv');
     await Future<void>.delayed(const Duration(milliseconds: 450));
+    await configStore.save(
+      (await configStore.load()).copyWith(recentFiles: const <String>[]),
+    );
 
     final secondController = WorkspaceController(
       gateway: FakeWorkspaceGateway(),
@@ -280,6 +450,9 @@ void main() {
       await firstController.runActiveTab();
       await firstController.fetchNextPage();
       await Future<void>.delayed(const Duration(milliseconds: 450));
+      await configStore.save(
+        (await configStore.load()).copyWith(recentFiles: const <String>[]),
+      );
 
       final secondController = WorkspaceController(
         gateway: FakeWorkspaceGateway(),

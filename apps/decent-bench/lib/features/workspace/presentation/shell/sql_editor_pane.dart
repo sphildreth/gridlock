@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../domain/app_config.dart';
 import '../../domain/sql_autocomplete.dart';
@@ -33,8 +34,11 @@ class SqlEditorPane extends StatelessWidget {
     required this.onStopQuery,
     required this.onFormatSql,
     required this.onInsertSnippet,
-    required this.onManageSnippets,
     required this.onApplyAutocomplete,
+    required this.selectedAutocompleteIndex,
+    required this.onAutocompleteNext,
+    required this.onAutocompletePrevious,
+    required this.onAcceptAutocomplete,
     required this.canRun,
     required this.canStop,
     required this.onFindChanged,
@@ -68,8 +72,11 @@ class SqlEditorPane extends StatelessWidget {
   final VoidCallback onStopQuery;
   final VoidCallback onFormatSql;
   final ValueChanged<SqlSnippet> onInsertSnippet;
-  final VoidCallback onManageSnippets;
   final ValueChanged<AutocompleteSuggestion> onApplyAutocomplete;
+  final int selectedAutocompleteIndex;
+  final VoidCallback onAutocompleteNext;
+  final VoidCallback onAutocompletePrevious;
+  final VoidCallback onAcceptAutocomplete;
   final bool canRun;
   final bool canStop;
   final ValueChanged<String> onFindChanged;
@@ -102,7 +109,6 @@ class SqlEditorPane extends StatelessWidget {
         onFormatSql: onFormatSql,
         onNewTab: onNewTab,
         onInsertSnippet: onInsertSnippet,
-        onManageSnippets: onManageSnippets,
       ),
       padding: EdgeInsets.zero,
       child: Column(
@@ -146,61 +152,124 @@ class SqlEditorPane extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F7FA),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: <Widget>[
-                  _LineNumberGutter(
-                    lineCount: _lineCount(sqlController.text),
-                    controller: editorScrollController,
-                    zoomFactor: zoomFactor,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      focusNode: focusNode,
-                      controller: sqlController,
-                      scrollController: editorScrollController,
-                      undoController: undoController,
-                      onChanged: onSqlChanged,
-                      expands: true,
-                      maxLines: null,
-                      minLines: null,
-                      textAlignVertical: TextAlignVertical.top,
-                      style: TextStyle(
-                        fontSize: 13 * zoomFactor,
-                        fontFamily: 'monospace',
-                        height: 1.45,
-                      ),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        hintText: 'SELECT *\nFROM your_table\nLIMIT 100;',
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final editorStyle = TextStyle(
+                  fontSize: 13 * zoomFactor,
+                  fontFamily: 'monospace',
+                  height: 1.45,
+                  color: const Color(0xFF111111),
+                );
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
                       ),
                     ),
                   ),
-                ],
-              ),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          _LineNumberGutter(
+                            lineCount: _lineCount(sqlController.text),
+                            controller: editorScrollController,
+                            zoomFactor: zoomFactor,
+                          ),
+                          Expanded(
+                            child: Shortcuts(
+                              shortcuts: autocompleteResult.isEmpty
+                                  ? const <ShortcutActivator, Intent>{}
+                                  : const <ShortcutActivator, Intent>{
+                                      SingleActivator(LogicalKeyboardKey.tab):
+                                          _AcceptAutocompleteIntent(),
+                                      SingleActivator(
+                                        LogicalKeyboardKey.arrowDown,
+                                      ): _NextAutocompleteIntent(),
+                                      SingleActivator(
+                                        LogicalKeyboardKey.arrowUp,
+                                      ): _PreviousAutocompleteIntent(),
+                                    },
+                              child: Actions(
+                                actions: <Type, Action<Intent>>{
+                                  _AcceptAutocompleteIntent:
+                                      CallbackAction<_AcceptAutocompleteIntent>(
+                                        onInvoke: (_) {
+                                          onAcceptAutocomplete();
+                                          return null;
+                                        },
+                                      ),
+                                  _NextAutocompleteIntent:
+                                      CallbackAction<_NextAutocompleteIntent>(
+                                        onInvoke: (_) {
+                                          onAutocompleteNext();
+                                          return null;
+                                        },
+                                      ),
+                                  _PreviousAutocompleteIntent:
+                                      CallbackAction<
+                                        _PreviousAutocompleteIntent
+                                      >(
+                                        onInvoke: (_) {
+                                          onAutocompletePrevious();
+                                          return null;
+                                        },
+                                      ),
+                                },
+                                child: TextField(
+                                  focusNode: focusNode,
+                                  controller: sqlController,
+                                  scrollController: editorScrollController,
+                                  undoController: undoController,
+                                  onChanged: onSqlChanged,
+                                  expands: true,
+                                  maxLines: null,
+                                  minLines: null,
+                                  textAlignVertical: TextAlignVertical.top,
+                                  style: editorStyle,
+                                  cursorColor: Colors.black,
+                                  decoration: const InputDecoration(
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.all(16),
+                                    hintText:
+                                        'SELECT *\nFROM your_table\nLIMIT 100;',
+                                    hintStyle: TextStyle(
+                                      color: Color(0xFF666666),
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (!autocompleteResult.isEmpty)
+                        _AutocompletePopup(
+                          result: autocompleteResult,
+                          selectedIndex: selectedAutocompleteIndex,
+                          editorTextStyle: editorStyle,
+                          editorText: sqlController.text,
+                          selection: sqlController.selection,
+                          editorScrollOffset: editorScrollController.hasClients
+                              ? editorScrollController.offset
+                              : 0,
+                          maxWidth: constraints.maxWidth,
+                          maxHeight: constraints.maxHeight,
+                          onApply: onApplyAutocomplete,
+                        ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
-          if (!autocompleteResult.isEmpty)
-            SizedBox(
-              height: 144,
-              child: _AutocompleteList(
-                result: autocompleteResult,
-                onApply: onApplyAutocomplete,
-              ),
-            )
-          else
-            const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
             child: Row(
               children: <Widget>[
                 _StateChip(label: 'State ${activeTab.phase.name}'),
@@ -316,7 +385,6 @@ class _EditorToolbar extends StatelessWidget {
     required this.onFormatSql,
     required this.onNewTab,
     required this.onInsertSnippet,
-    required this.onManageSnippets,
   });
 
   final bool canRun;
@@ -327,7 +395,6 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback onFormatSql;
   final VoidCallback onNewTab;
   final ValueChanged<SqlSnippet> onInsertSnippet;
-  final VoidCallback onManageSnippets;
 
   @override
   Widget build(BuildContext context) {
@@ -383,11 +450,6 @@ class _EditorToolbar extends StatelessWidget {
               label: const Text('Snippets'),
             ),
           ),
-        ),
-        OutlinedButton.icon(
-          onPressed: onManageSnippets,
-          icon: const Icon(Icons.library_books_outlined, size: 16),
-          label: const Text('Manage'),
         ),
       ],
     );
@@ -475,7 +537,7 @@ class _LineNumberGutter extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 48,
-      color: const Color(0xFFE9EEF5),
+      color: const Color(0xFFF0F0F0),
       child: ClipRect(
         child: AnimatedBuilder(
           animation: controller,
@@ -494,7 +556,7 @@ class _LineNumberGutter extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 12 * zoomFactor,
                           fontFamily: 'monospace',
-                          color: Theme.of(context).hintColor,
+                          color: const Color(0xFF555555),
                         ),
                       ),
                     ),
@@ -508,57 +570,188 @@ class _LineNumberGutter extends StatelessWidget {
   }
 }
 
-class _AutocompleteList extends StatelessWidget {
-  const _AutocompleteList({required this.result, required this.onApply});
+class _AutocompletePopup extends StatelessWidget {
+  const _AutocompletePopup({
+    required this.result,
+    required this.selectedIndex,
+    required this.editorTextStyle,
+    required this.editorText,
+    required this.selection,
+    required this.editorScrollOffset,
+    required this.maxWidth,
+    required this.maxHeight,
+    required this.onApply,
+  });
 
   final AutocompleteResult result;
+  final int selectedIndex;
+  final TextStyle editorTextStyle;
+  final String editorText;
+  final TextSelection selection;
+  final double editorScrollOffset;
+  final double maxWidth;
+  final double maxHeight;
   final ValueChanged<AutocompleteSuggestion> onApply;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(
-              'Autocomplete',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
+    final popupWidth = maxWidth < 380 ? maxWidth - 16 : 360.0;
+    final popupHeight = (result.suggestions.length.clamp(1, 6) * 40) + 34.0;
+    final position = _popupOffset(
+      popupWidth: popupWidth,
+      popupHeight: popupHeight,
+    );
+
+    return Positioned(
+      left: position.dx,
+      top: position.dy,
+      child: Material(
+        elevation: 6,
+        color: Colors.white,
+        child: Container(
+          width: popupWidth,
+          constraints: BoxConstraints(maxHeight: popupHeight),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: result.suggestions.length,
-              itemBuilder: (context, index) {
-                final suggestion = result.suggestions[index];
-                return ListTile(
-                  dense: true,
-                  onTap: () => onApply(suggestion),
-                  leading: Icon(_iconForKind(suggestion.kind), size: 16),
-                  title: Text(suggestion.label),
-                  subtitle: Text(suggestion.detail),
-                );
-              },
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                color: const Color(0xFFF6F6F6),
+                child: Text(
+                  'Suggestions · Tab to accept',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: result.suggestions.length,
+                  itemBuilder: (context, index) {
+                    final suggestion = result.suggestions[index];
+                    final selected = index == selectedIndex;
+                    return InkWell(
+                      onTap: () => onApply(suggestion),
+                      child: Container(
+                        color: selected
+                            ? const Color(0xFFE7F1FF)
+                            : Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Icon(_iconForKind(suggestion.kind), size: 16),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    suggestion.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontWeight: selected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                  ),
+                                  Text(
+                                    suggestion.detail,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: const Color(0xFF666666),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  IconData _iconForKind(AutocompleteSuggestionKind kind) {
-    return switch (kind) {
-      AutocompleteSuggestionKind.object => Icons.table_rows_outlined,
-      AutocompleteSuggestionKind.column => Icons.view_column_outlined,
-      AutocompleteSuggestionKind.function => Icons.functions_outlined,
-      AutocompleteSuggestionKind.keyword => Icons.key_outlined,
-      AutocompleteSuggestionKind.snippet => Icons.code_outlined,
-    };
+  Offset _popupOffset({
+    required double popupWidth,
+    required double popupHeight,
+  }) {
+    final clampedOffset = selection.isValid && selection.baseOffset >= 0
+        ? selection.baseOffset.clamp(0, editorText.length).toInt()
+        : editorText.length;
+    final beforeCursor = editorText.substring(0, clampedOffset);
+    final lastLineBreak = beforeCursor.lastIndexOf('\n');
+    final lineIndex = '\n'.allMatches(beforeCursor).length;
+    final columnIndex = beforeCursor.length - (lastLineBreak + 1);
+    final lineHeight =
+        (editorTextStyle.fontSize ?? 13) * (editorTextStyle.height ?? 1.4);
+    final textPainter = TextPainter(
+      text: TextSpan(text: 'M', style: editorTextStyle),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    final charWidth = textPainter.width;
+
+    final rawLeft = 48 + 16 + (columnIndex * charWidth);
+    final rawTop =
+        16 + (lineIndex * lineHeight) - editorScrollOffset + lineHeight;
+    final clampedLeft = rawLeft
+        .clamp(8.0, maxWidth - popupWidth - 8.0)
+        .toDouble();
+    final preferredTop = rawTop
+        .clamp(8.0, maxHeight - popupHeight - 8.0)
+        .toDouble();
+    final fallbackTop = (rawTop - popupHeight - lineHeight)
+        .clamp(8.0, maxHeight - popupHeight - 8.0)
+        .toDouble();
+    final finalTop = preferredTop > maxHeight - popupHeight - 8.0
+        ? fallbackTop
+        : preferredTop;
+    return Offset(clampedLeft, finalTop);
   }
+}
+
+IconData _iconForKind(AutocompleteSuggestionKind kind) {
+  return switch (kind) {
+    AutocompleteSuggestionKind.object => Icons.table_rows_outlined,
+    AutocompleteSuggestionKind.column => Icons.view_column_outlined,
+    AutocompleteSuggestionKind.function => Icons.functions_outlined,
+    AutocompleteSuggestionKind.keyword => Icons.key_outlined,
+    AutocompleteSuggestionKind.snippet => Icons.code_outlined,
+  };
+}
+
+class _AcceptAutocompleteIntent extends Intent {
+  const _AcceptAutocompleteIntent();
+}
+
+class _NextAutocompleteIntent extends Intent {
+  const _NextAutocompleteIntent();
+}
+
+class _PreviousAutocompleteIntent extends Intent {
+  const _PreviousAutocompleteIntent();
 }
 
 class _StateChip extends StatelessWidget {

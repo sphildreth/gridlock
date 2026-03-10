@@ -101,6 +101,8 @@ formatter, JSON/Parquet/Excel export, and multi-tab editing.
   reference, even when dedicated UI affordances for some engine features arrive
   later
 - Schema-aware autocomplete
+- Autocomplete suggestions should appear inside the editor surface and accept
+  with `Tab` instead of rendering in a detached tray below the editor
 - User-editable snippets
 - Deterministic SQL formatter
 
@@ -263,6 +265,12 @@ Each tab owns:
 - execution-plan metadata derived from `EXPLAIN` when available
 - error panel state
 - export state for the active result set
+
+When a real workspace is auto-reopened from the recent-files list during app
+startup, the shell should rerun the most recent saved query for that workspace
+so the results area is populated immediately. If there is no saved query
+history, the shell should run a first-table preview query that visibly
+populates the results pane.
 
 Keyboard requirements:
 

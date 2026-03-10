@@ -7,6 +7,16 @@ import '../infrastructure/shortcut_config_service.dart';
 
 typedef SavePreferencesDraft = Future<String?> Function(AppConfig config);
 
+enum PreferencesDialogSection {
+  general,
+  export,
+  editor,
+  layout,
+  shortcuts,
+  snippets,
+  toml,
+}
+
 class PreferencesDialog extends StatefulWidget {
   const PreferencesDialog({
     super.key,
@@ -15,6 +25,7 @@ class PreferencesDialog extends StatefulWidget {
     required this.shortcutConfigService,
     required this.createSnippetId,
     required this.onSave,
+    this.initialSection = PreferencesDialogSection.general,
   });
 
   final AppConfig initialConfig;
@@ -22,19 +33,10 @@ class PreferencesDialog extends StatefulWidget {
   final ShortcutConfigService shortcutConfigService;
   final String Function() createSnippetId;
   final SavePreferencesDraft onSave;
+  final PreferencesDialogSection initialSection;
 
   @override
   State<PreferencesDialog> createState() => _PreferencesDialogState();
-}
-
-enum _PreferencesSection {
-  general,
-  export,
-  editor,
-  layout,
-  shortcuts,
-  snippets,
-  toml,
 }
 
 class _PreferencesDialogState extends State<PreferencesDialog> {
@@ -75,7 +77,7 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
   late List<String> _recentFiles;
   late final Map<String, TextEditingController> _shortcutControllers;
   late List<_SnippetDraft> _snippetDrafts;
-  _PreferencesSection _section = _PreferencesSection.general;
+  late PreferencesDialogSection _section;
   String? _errorMessage;
   bool _isSaving = false;
 
@@ -98,6 +100,7 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
     _autocompleteEnabled = initial.editorSettings.autocompleteEnabled;
     _uppercaseKeywords = initial.editorSettings.formatUppercaseKeywords;
     _recentFiles = <String>[...initial.recentFiles];
+    _section = widget.initialSection;
     final defaults = AppConfig.defaultShortcutBindings();
     _shortcutControllers = <String, TextEditingController>{
       for (final commandId in defaults.keys.toList()..sort())
@@ -186,14 +189,19 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
                     child: Padding(
                       padding: const EdgeInsets.all(20),
                       child: switch (_section) {
-                        _PreferencesSection.general => _buildGeneralSection(),
-                        _PreferencesSection.export => _buildExportSection(),
-                        _PreferencesSection.editor => _buildEditorSection(),
-                        _PreferencesSection.layout => _buildLayoutSection(),
-                        _PreferencesSection.shortcuts =>
+                        PreferencesDialogSection.general =>
+                          _buildGeneralSection(),
+                        PreferencesDialogSection.export =>
+                          _buildExportSection(),
+                        PreferencesDialogSection.editor =>
+                          _buildEditorSection(),
+                        PreferencesDialogSection.layout =>
+                          _buildLayoutSection(),
+                        PreferencesDialogSection.shortcuts =>
                           _buildShortcutsSection(),
-                        _PreferencesSection.snippets => _buildSnippetsSection(),
-                        _PreferencesSection.toml => _buildTomlSection(
+                        PreferencesDialogSection.snippets =>
+                          _buildSnippetsSection(),
+                        PreferencesDialogSection.toml => _buildTomlSection(
                           preview.error,
                           preview.config,
                         ),
@@ -233,7 +241,7 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
       onDestinationSelected: (index) {
         setState(() {
           _errorMessage = null;
-          _section = _PreferencesSection.values[index];
+          _section = PreferencesDialogSection.values[index];
         });
       },
       labelType: NavigationRailLabelType.all,
