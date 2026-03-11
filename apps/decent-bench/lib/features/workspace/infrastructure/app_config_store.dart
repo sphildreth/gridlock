@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
+import '../../../app/app_support_paths.dart';
+import '../../../app/logging/app_logger.dart';
 import '../domain/app_config.dart';
 
 abstract class WorkspaceConfigStore {
@@ -13,17 +13,37 @@ abstract class WorkspaceConfigStore {
 }
 
 class AppConfigStore implements WorkspaceConfigStore {
-  AppConfigStore({File? fileOverride}) : _fileOverride = fileOverride;
+  AppConfigStore({File? fileOverride, AppLogger? logger})
+    : _fileOverride = fileOverride,
+      _logger = logger ?? const NoOpAppLogger();
 
   final File? _fileOverride;
+  final AppLogger _logger;
 
   @override
   Future<AppConfig> load() async {
     final file = _resolveFile();
     if (!await file.exists()) {
+      _logger.info(
+        category: 'config',
+        operation: 'load',
+        message: 'Config file does not exist; using defaults.',
+        details: <String, Object?>{'path': file.path},
+      );
       return AppConfig.defaults();
     }
-    return AppConfig.fromToml(await file.readAsString());
+    final config = AppConfig.fromToml(await file.readAsString());
+    _logger.info(
+      category: 'config',
+      operation: 'load',
+      message: 'Loaded application configuration.',
+      details: <String, Object?>{
+        'path': file.path,
+        'theme_id': config.appearance.activeTheme,
+        'verbosity': config.logging.verbosity.name,
+      },
+    );
+    return config;
   }
 
   @override
@@ -31,6 +51,16 @@ class AppConfigStore implements WorkspaceConfigStore {
     final file = _resolveFile();
     await file.parent.create(recursive: true);
     await file.writeAsString(config.toToml());
+    _logger.info(
+      category: 'config',
+      operation: 'save',
+      message: 'Saved application configuration.',
+      details: <String, Object?>{
+        'path': file.path,
+        'theme_id': config.appearance.activeTheme,
+        'verbosity': config.logging.verbosity.name,
+      },
+    );
   }
 
   @override
@@ -40,37 +70,6 @@ class AppConfigStore implements WorkspaceConfigStore {
     if (_fileOverride != null) {
       return _fileOverride;
     }
-
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    if (Platform.isLinux) {
-      return File(
-        p.join(
-          Platform.environment['XDG_CONFIG_HOME'] ?? p.join(home, '.config'),
-          'decent-bench',
-          'config.toml',
-        ),
-      );
-    }
-    if (Platform.isMacOS) {
-      return File(
-        p.join(
-          home,
-          'Library',
-          'Application Support',
-          'Decent Bench',
-          'config.toml',
-        ),
-      );
-    }
-    if (Platform.isWindows) {
-      return File(
-        p.join(
-          Platform.environment['APPDATA'] ?? p.join(home, 'AppData', 'Roaming'),
-          'Decent Bench',
-          'config.toml',
-        ),
-      );
-    }
-    return File(p.join(home, '.decent-bench', 'config.toml'));
+    return File(AppSupportPaths.resolveConfigFilePath());
   }
 }

@@ -50,7 +50,7 @@ behavior.
 
 ### References
 
-- `docs/THEME_SYSTEM.md`
+- `design/THEME_SYSTEM.md`
 - `design/adr/0013-external-toml-theme-system.md`
 - `design/adr/0014-desktop-editor-and-context-workflows.md`
 - `apps/decent-bench/lib/features/workspace/presentation/shell/sql_editor_pane.dart`

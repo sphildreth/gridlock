@@ -1,9 +1,12 @@
 import 'package:decent_bench/app/app.dart';
+import 'package:decent_bench/app/logging/app_logger.dart';
 import 'package:decent_bench/app/startup_launch_options.dart';
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_shell_preferences.dart';
+import 'package:decent_bench/features/workspace/infrastructure/shortcut_config_service.dart';
+import 'package:decent_bench/features/workspace/presentation/preferences_dialog.dart';
 import 'package:decent_bench/features/workspace/presentation/shell/results_pane.dart';
 import 'package:decent_bench/features/workspace/presentation/shell/status_bar.dart';
 import 'package:flutter/material.dart';
@@ -33,7 +36,11 @@ void main() {
 
     await controller.initialize();
     await tester.pumpWidget(
-      DecentBenchApp(controller: controller, autoInitialize: false),
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -86,7 +93,11 @@ void main() {
     });
     await controller.initialize();
     await tester.pumpWidget(
-      DecentBenchApp(controller: controller, autoInitialize: false),
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -117,6 +128,7 @@ void main() {
         controller: controller,
         autoInitialize: false,
         appLifecycleService: lifecycle,
+        logger: const NoOpAppLogger(),
       ),
     );
     await tester.pumpAndSettle();
@@ -144,7 +156,11 @@ void main() {
     });
     await controller.initialize();
     await tester.pumpWidget(
-      DecentBenchApp(controller: controller, autoInitialize: false),
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -177,6 +193,7 @@ void main() {
         startupLaunchOptions: const StartupLaunchOptions(
           importSourcePath: '/tmp/source.xlsx',
         ),
+        logger: const NoOpAppLogger(),
       ),
     );
     await tester.pumpAndSettle();
@@ -239,4 +256,132 @@ void main() {
 
     expect(find.textContaining('SCAN tasks'), findsOneWidget);
   });
+
+  testWidgets(
+    'preferences dialog previews theme changes without persisting until save',
+    (tester) async {
+      Future<void> settleUi() async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+      }
+
+      final initialConfig = AppConfig.defaults();
+      AppConfig? savedConfig;
+      String? previewedThemeId;
+
+      _configureDesktopViewport(tester);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PreferencesDialog(
+            initialConfig: initialConfig,
+            configFilePath: '/tmp/config.toml',
+            shortcutConfigService: const ShortcutConfigService(),
+            createSnippetId: () => 'snippet-1',
+            availableThemesById: const <String, String>{
+              'classic-dark': 'Classic Dark',
+              'classic-light': 'Classic Light',
+            },
+            resolvedThemesDirectory: '/tmp/themes',
+            onPreviewTheme: (themeId) async {
+              previewedThemeId = themeId;
+            },
+            onSave: (config) async {
+              savedConfig = config;
+              return null;
+            },
+          ),
+        ),
+      );
+      await settleUi();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('preferences.active_theme')),
+      );
+      await settleUi();
+      await tester.tap(find.text('Classic Light').last);
+      await settleUi();
+
+      expect(previewedThemeId, 'classic-light');
+      expect(savedConfig, isNull);
+      expect(initialConfig.appearance.activeTheme, 'classic-dark');
+    },
+  );
+
+  testWidgets('editor line numbers respect the configuration toggle', (
+    tester,
+  ) async {
+    final config = AppConfig.defaults().copyWith(
+      editorSettings: AppConfig.defaults().editorSettings.copyWith(
+        showLineNumbers: false,
+      ),
+    );
+    final controller = WorkspaceController(
+      gateway: FakeWorkspaceGateway(),
+      configStore: InMemoryConfigStore(config),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+    );
+
+    _configureDesktopViewport(tester);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      controller.dispose();
+    });
+    await controller.initialize();
+    await tester.pumpWidget(
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('sql_editor.gutter')),
+      findsNothing,
+    );
+  });
+
+  testWidgets(
+    'open databases with empty schemas do not render sample schema placeholders',
+    (tester) async {
+      final gateway = FakeWorkspaceGateway()..snapshot = SchemaSnapshot.empty();
+      final controller = WorkspaceController(
+        gateway: gateway,
+        configStore: InMemoryConfigStore(),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+
+      _configureDesktopViewport(tester);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        controller.dispose();
+      });
+
+      await controller.initialize();
+      await controller.openDatabase(
+        '/tmp/empty-schema-${DateTime.now().microsecondsSinceEpoch}.ddb',
+        createIfMissing: true,
+      );
+      await tester.pumpWidget(
+        DecentBenchApp(
+          controller: controller,
+          autoInitialize: false,
+          logger: const NoOpAppLogger(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('customers'), findsNothing);
+      expect(find.text('orders'), findsNothing);
+      expect(find.text('active_orders'), findsNothing);
+    },
+  );
 }

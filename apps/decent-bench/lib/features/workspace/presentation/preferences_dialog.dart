@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,6 +8,7 @@ import '../domain/workspace_shell_preferences.dart';
 import '../infrastructure/shortcut_config_service.dart';
 
 typedef SavePreferencesDraft = Future<String?> Function(AppConfig config);
+typedef PreviewThemeDraft = Future<void> Function(String themeId);
 
 enum PreferencesDialogSection {
   general,
@@ -24,7 +27,10 @@ class PreferencesDialog extends StatefulWidget {
     required this.configFilePath,
     required this.shortcutConfigService,
     required this.createSnippetId,
+    required this.availableThemesById,
+    required this.resolvedThemesDirectory,
     required this.onSave,
+    this.onPreviewTheme,
     this.initialSection = PreferencesDialogSection.general,
   });
 
@@ -32,7 +38,10 @@ class PreferencesDialog extends StatefulWidget {
   final String configFilePath;
   final ShortcutConfigService shortcutConfigService;
   final String Function() createSnippetId;
+  final Map<String, String> availableThemesById;
+  final String resolvedThemesDirectory;
   final SavePreferencesDraft onSave;
+  final PreviewThemeDraft? onPreviewTheme;
   final PreferencesDialogSection initialSection;
 
   @override
@@ -72,9 +81,12 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
   late final TextEditingController _autocompleteMaxController;
   late final TextEditingController _indentSpacesController;
   late WorkspaceShellPreferences _shellPreferences;
+  late String _activeThemeId;
+  late LogVerbosity _loggingVerbosity;
   late bool _csvIncludeHeaders;
   late bool _autocompleteEnabled;
   late bool _uppercaseKeywords;
+  late bool _showLineNumbers;
   late List<String> _recentFiles;
   late final Map<String, TextEditingController> _shortcutControllers;
   late List<_SnippetDraft> _snippetDrafts;
@@ -97,9 +109,17 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
       text: initial.editorSettings.indentSpaces.toString(),
     );
     _shellPreferences = initial.shellPreferences.normalized();
+    _activeThemeId =
+        widget.availableThemesById.containsKey(initial.appearance.activeTheme)
+        ? initial.appearance.activeTheme
+        : (widget.availableThemesById.keys.isEmpty
+              ? initial.appearance.activeTheme
+              : widget.availableThemesById.keys.first);
+    _loggingVerbosity = initial.logging.verbosity;
     _csvIncludeHeaders = initial.csvIncludeHeaders;
     _autocompleteEnabled = initial.editorSettings.autocompleteEnabled;
     _uppercaseKeywords = initial.editorSettings.formatUppercaseKeywords;
+    _showLineNumbers = initial.editorSettings.showLineNumbers;
     _recentFiles = <String>[...initial.recentFiles];
     _section = widget.initialSection;
     final defaults = AppConfig.defaultShortcutBindings();
@@ -332,6 +352,88 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
           ),
           const SizedBox(height: 16),
           _SettingsCard(
+            title: 'Appearance',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                DropdownButtonFormField<String>(
+                  key: const ValueKey<String>('preferences.active_theme'),
+                  initialValue: _activeThemeId,
+                  decoration: const InputDecoration(
+                    labelText: 'Application theme',
+                    helperText:
+                        'Changing this previews the theme immediately. Saving persists it.',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _sortedThemeEntries()
+                      .map(
+                        (entry) => DropdownMenuItem<String>(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _activeThemeId = value;
+                      _errorMessage = null;
+                    });
+                    if (widget.onPreviewTheme != null) {
+                      unawaited(widget.onPreviewTheme!(value));
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Themes directory',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                SelectableText(
+                  widget.resolvedThemesDirectory,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsCard(
+            title: 'Logging',
+            child: DropdownButtonFormField<LogVerbosity>(
+              key: const ValueKey<String>('preferences.logging_verbosity'),
+              initialValue: _loggingVerbosity,
+              decoration: const InputDecoration(
+                labelText: 'Log verbosity',
+                helperText:
+                    'Lower levels write more records to decent-bench-log.ddb.',
+                border: OutlineInputBorder(),
+              ),
+              items: LogVerbosity.values
+                  .map(
+                    (value) => DropdownMenuItem<LogVerbosity>(
+                      value: value,
+                      child: Text(value.label),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _loggingVerbosity = value;
+                  _errorMessage = null;
+                });
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsCard(
             title: 'Recent Workspaces',
             trailing: TextButton(
               onPressed: _recentFiles.isEmpty
@@ -481,6 +583,19 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
             title: 'Formatting',
             child: Column(
               children: <Widget>[
+                SwitchListTile.adaptive(
+                  value: _showLineNumbers,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show line numbers'),
+                  subtitle: const Text(
+                    'Displays the SQL editor gutter with line numbers and error markers.',
+                  ),
+                  onChanged: (value) => setState(() {
+                    _showLineNumbers = value;
+                    _errorMessage = null;
+                  }),
+                ),
+                const SizedBox(height: 8),
                 SwitchListTile.adaptive(
                   value: _uppercaseKeywords,
                   contentPadding: EdgeInsets.zero,
@@ -905,6 +1020,12 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
     return _DraftBuildResult.success(
       widget.initialConfig.copyWith(
         configVersion: AppConfig.currentConfigVersion,
+        appearance: widget.initialConfig.appearance.copyWith(
+          activeTheme: _activeThemeId,
+        ),
+        logging: widget.initialConfig.logging.copyWith(
+          verbosity: _loggingVerbosity,
+        ),
         recentFiles: _recentFiles
             .map((path) => path.trim())
             .where((path) => path.isNotEmpty)
@@ -917,12 +1038,22 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
           autocompleteMaxSuggestions: autocompleteMax,
           formatUppercaseKeywords: _uppercaseKeywords,
           indentSpaces: indentSpaces,
+          showLineNumbers: _showLineNumbers,
         ),
         shellPreferences: _shellPreferences.normalized(),
         shortcutBindings: shortcutBindings,
         snippets: snippets,
       ),
     );
+  }
+
+  List<MapEntry<String, String>> _sortedThemeEntries() {
+    final entries = widget.availableThemesById.entries.toList()
+      ..sort(
+        (left, right) =>
+            left.value.toLowerCase().compareTo(right.value.toLowerCase()),
+      );
+    return entries;
   }
 
   void _handleDraftChanged() {

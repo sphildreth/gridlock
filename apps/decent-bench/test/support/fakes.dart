@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:decent_bench/app/logging/app_logger.dart';
 import 'package:decent_bench/features/workspace/domain/app_config.dart';
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
@@ -56,6 +57,97 @@ class FakeAppLifecycleService implements AppLifecycleService {
   @override
   Future<void> requestExit() async {
     requestedExit = true;
+  }
+}
+
+class RecordedLogEntry {
+  const RecordedLogEntry({
+    required this.level,
+    required this.category,
+    required this.message,
+    this.operation,
+    this.databasePath,
+    this.sql,
+    this.rowCount,
+    this.rowsAffected,
+    this.elapsedNanos,
+    this.details,
+  });
+
+  final LogVerbosity level;
+  final String category;
+  final String message;
+  final String? operation;
+  final String? databasePath;
+  final String? sql;
+  final int? rowCount;
+  final int? rowsAffected;
+  final int? elapsedNanos;
+  final Map<String, Object?>? details;
+}
+
+class RecordingAppLogger extends AppLogger {
+  RecordingAppLogger({this.minimumLevel = LogVerbosity.debug});
+
+  @override
+  String get logDatabasePath => '/tmp/decent-bench-log.ddb';
+
+  LogVerbosity minimumLevel;
+  final List<RecordedLogEntry> entries = <RecordedLogEntry>[];
+  bool initialized = false;
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<void> initialize({LogVerbosity? minimumLevel}) async {
+    initialized = true;
+    if (minimumLevel != null) {
+      this.minimumLevel = minimumLevel;
+    }
+  }
+
+  @override
+  void log({
+    required LogVerbosity level,
+    required String category,
+    required String message,
+    String? operation,
+    String? databasePath,
+    String? sql,
+    int? rowCount,
+    int? rowsAffected,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (level.value < minimumLevel.value) {
+      return;
+    }
+    entries.add(
+      RecordedLogEntry(
+        level: level,
+        category: category,
+        message: message,
+        operation: operation,
+        databasePath: databasePath,
+        sql: sql,
+        rowCount: rowCount,
+        rowsAffected: rowsAffected,
+        elapsedNanos: elapsedNanos,
+        details: <String, Object?>{
+          ...?details,
+          if (error != null) 'error': error.toString(),
+          if (stackTrace != null) 'stack_trace': stackTrace.toString(),
+        },
+      ),
+    );
+  }
+
+  @override
+  void updateMinimumLevel(LogVerbosity minimumLevel) {
+    this.minimumLevel = minimumLevel;
   }
 }
 

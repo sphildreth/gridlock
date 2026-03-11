@@ -43,4 +43,23 @@ accent = "#12"
       isFalse,
     );
   });
+
+  test('previewed themes can be restored from saved config', () async {
+    final manager = ThemeManager();
+    addTearDown(manager.dispose);
+
+    const savedAppearance = AppearanceSettings(
+      activeTheme: 'classic-dark',
+      themesDir: null,
+    );
+
+    await manager.loadFromConfig(savedAppearance);
+    expect(manager.currentTheme.id, 'classic-dark');
+
+    await manager.switchTheme('classic-light');
+    expect(manager.currentTheme.id, 'classic-light');
+
+    await manager.loadFromConfig(savedAppearance);
+    expect(manager.currentTheme.id, 'classic-dark');
+  });
 }

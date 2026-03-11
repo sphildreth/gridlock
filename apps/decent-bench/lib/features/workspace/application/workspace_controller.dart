@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../app/logging/app_logger.dart';
 import '../domain/app_config.dart';
 import '../domain/excel_import_models.dart';
 import '../domain/sql_dump_import_models.dart';
@@ -26,14 +27,17 @@ class WorkspaceController extends ChangeNotifier {
     WorkspaceConfigStore? configStore,
     WorkspaceStateStore? workspaceStateStore,
     LayoutPersistenceService? layoutPersistenceService,
-  }) : _gateway = gateway ?? DecentDbBridge(),
-       _configStore = configStore ?? AppConfigStore(),
+    AppLogger? logger,
+  }) : _logger = logger ?? const NoOpAppLogger(),
+       _gateway = gateway ?? DecentDbBridge(),
+       _configStore = configStore ?? AppConfigStore(logger: logger),
        _workspaceStateStore = workspaceStateStore ?? FileWorkspaceStateStore(),
        _layoutPersistenceService =
            layoutPersistenceService ?? const LayoutPersistenceService() {
     _resetTabs(notify: false, resetCounters: true);
   }
 
+  final AppLogger _logger;
   final WorkspaceDatabaseGateway _gateway;
   final WorkspaceConfigStore _configStore;
   final WorkspaceStateStore _workspaceStateStore;
@@ -100,6 +104,112 @@ class WorkspaceController extends ChangeNotifier {
 
   bool get canCancelActiveTab => tabById(activeTabId)?.canCancel ?? false;
 
+  void _logDebug(
+    String operation,
+    String message, {
+    String category = 'workspace',
+    String? databasePath,
+    String? sql,
+    int? rowCount,
+    int? rowsAffected,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+  }) {
+    _logger.debug(
+      category: category,
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      sql: sql,
+      rowCount: rowCount,
+      rowsAffected: rowsAffected,
+      elapsedNanos: elapsedNanos,
+      details: details,
+    );
+  }
+
+  void _logInfo(
+    String operation,
+    String message, {
+    String category = 'workspace',
+    String? databasePath,
+    String? sql,
+    int? rowCount,
+    int? rowsAffected,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+  }) {
+    _logger.info(
+      category: category,
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      sql: sql,
+      rowCount: rowCount,
+      rowsAffected: rowsAffected,
+      elapsedNanos: elapsedNanos,
+      details: details,
+    );
+  }
+
+  void _logWarning(
+    String operation,
+    String message, {
+    String category = 'workspace',
+    String? databasePath,
+    String? sql,
+    int? rowCount,
+    int? rowsAffected,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    _logger.warning(
+      category: category,
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      sql: sql,
+      rowCount: rowCount,
+      rowsAffected: rowsAffected,
+      elapsedNanos: elapsedNanos,
+      details: details,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  void _logError(
+    String operation,
+    String message, {
+    String category = 'workspace',
+    String? databasePath,
+    String? sql,
+    int? rowCount,
+    int? rowsAffected,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    _logger.error(
+      category: category,
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      sql: sql,
+      rowCount: rowCount,
+      rowsAffected: rowsAffected,
+      elapsedNanos: elapsedNanos,
+      details: details,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  int _durationToNanos(Duration duration) => duration.inMicroseconds * 1000;
+
   QueryTabState? tabById(String tabId) {
     for (final tab in tabs) {
       if (tab.id == tabId) {
@@ -131,15 +241,36 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
 
+    final stopwatch = Stopwatch()..start();
+    await _logger.initialize(minimumLevel: config.logging.verbosity);
+    _logInfo('initialize', 'Starting workspace controller initialization.');
     try {
       config = await _configStore.load();
+      _logger.updateMinimumLevel(config.logging.verbosity);
       nativeLibraryPath = await _gateway.initialize();
       workspaceMessage = 'Ready.';
       workspaceError = null;
       await _reopenMostRecentWorkspaceIfAvailable();
+      _logInfo(
+        'initialize',
+        'Workspace controller initialized.',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'native_library_path': nativeLibraryPath,
+          'recent_file_count': config.recentFiles.length,
+          'theme_id': config.appearance.activeTheme,
+          'verbosity': config.logging.verbosity.name,
+        },
+      );
     } catch (error) {
       workspaceError = error.toString();
       workspaceMessage = null;
+      _logError(
+        'initialize',
+        'Workspace controller initialization failed.',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+      );
     } finally {
       isInitializing = false;
       _safeNotify();
@@ -151,6 +282,7 @@ class WorkspaceController extends ChangeNotifier {
     required bool createIfMissing,
     bool restoreStartupQuery = false,
   }) async {
+    final stopwatch = Stopwatch()..start();
     final normalized = rawPath.trim();
     if (normalized.isEmpty) {
       _setWorkspaceError('Enter a DecentDB file path first.');
@@ -187,6 +319,15 @@ class WorkspaceController extends ChangeNotifier {
         ? 'Creating database...'
         : 'Opening database...';
     _safeNotify();
+    _logInfo(
+      'open_database',
+      createIfMissing ? 'Creating database.' : 'Opening database.',
+      databasePath: normalized,
+      details: <String, Object?>{
+        'create_if_missing': createIfMissing,
+        'restore_startup_query': restoreStartupQuery,
+      },
+    );
 
     try {
       final session = await _gateway.openDatabase(normalized);
@@ -205,12 +346,31 @@ class WorkspaceController extends ChangeNotifier {
           'Opened ${p.basename(session.path)}'
           ' on DecentDB ${session.engineVersion}'
           ' with ${tabs.length} query tab${tabs.length == 1 ? '' : 's'}.';
+      _logInfo(
+        'open_database',
+        'Opened database successfully.',
+        databasePath: session.path,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'engine_version': session.engineVersion,
+          'tab_count': tabs.length,
+          'schema_tables': schema.tables.length,
+          'schema_views': schema.views.length,
+        },
+      );
     } catch (error) {
       databasePath = null;
       engineVersion = null;
       schema = SchemaSnapshot.empty();
       _setWorkspaceError(error.toString());
       _resetTabs(notify: false, resetCounters: true);
+      _logError(
+        'open_database',
+        'Opening database failed.',
+        databasePath: normalized,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+      );
     } finally {
       isOpeningDatabase = false;
       isSchemaLoading = false;
@@ -222,6 +382,8 @@ class WorkspaceController extends ChangeNotifier {
     if (!hasOpenDatabase) {
       return;
     }
+
+    final stopwatch = Stopwatch()..start();
 
     if (showLoadingState) {
       isSchemaLoading = true;
@@ -235,8 +397,26 @@ class WorkspaceController extends ChangeNotifier {
       workspaceMessage =
           'Loaded ${schema.tables.length} tables and ${schema.views.length} views.';
       workspaceError = null;
+      _logInfo(
+        'refresh_schema',
+        'Loaded schema snapshot.',
+        databasePath: databasePath,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'table_count': schema.tables.length,
+          'view_count': schema.views.length,
+          'index_count': schema.indexes.length,
+        },
+      );
     } catch (error) {
       _setWorkspaceError(error.toString());
+      _logError(
+        'refresh_schema',
+        'Schema refresh failed.',
+        databasePath: databasePath,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+      );
     } finally {
       isSchemaLoading = false;
       _safeNotify();
@@ -404,6 +584,7 @@ class WorkspaceController extends ChangeNotifier {
     int sqlBufferStartOffset = 0,
     String sqlOverrideDescription = 'selected SQL',
   }) async {
+    final stopwatch = Stopwatch()..start();
     final tab = tabById(tabId);
     if (tab == null || !canRunTab(tabId)) {
       return;
@@ -477,6 +658,20 @@ class WorkspaceController extends ChangeNotifier {
       notify: false,
     );
     _safeNotify();
+    _logInfo(
+      'run_query',
+      isAlternateSql
+          ? 'Executing $sqlOverrideDescription.'
+          : 'Executing SQL buffer.',
+      category: 'query',
+      databasePath: databasePath,
+      sql: trimmedSql,
+      details: <String, Object?>{
+        'tab_id': tabId,
+        'execution_target': isAlternateSql ? sqlOverrideDescription : 'buffer',
+        'parameter_count': params.length,
+      },
+    );
 
     if (previousCursor != null) {
       unawaited(_gateway.cancelQuery(previousCursor));
@@ -522,8 +717,25 @@ class WorkspaceController extends ChangeNotifier {
           ),
         );
         if (!page.done) {
+          _logger.logQueryTiming(
+            databasePath: databasePath ?? '',
+            sql: trimmedSql,
+            rowCount: page.rows.length,
+            rowsAffected: page.rowsAffected,
+            elapsedNanos: _durationToNanos(page.elapsed),
+            operation: 'query.first_page',
+            details: <String, Object?>{'tab_id': tabId, 'has_more_rows': true},
+          );
           return withMessage;
         }
+        _logger.logQueryTiming(
+          databasePath: databasePath ?? '',
+          sql: trimmedSql,
+          rowCount: withMessage.resultRows.length,
+          rowsAffected: withMessage.rowsAffected,
+          elapsedNanos: _durationToNanos(withMessage.elapsed ?? page.elapsed),
+          details: <String, Object?>{'tab_id': tabId, 'has_more_rows': false},
+        );
         return withMessage.copyWith(
           queryHistory: _appendQueryHistory(
             withMessage.queryHistory,
@@ -588,6 +800,21 @@ class WorkspaceController extends ChangeNotifier {
             ),
           );
         }, notify: false);
+        _logError(
+          'run_query',
+          'Query execution failed.',
+          category: 'query',
+          databasePath: databasePath,
+          sql: trimmedSql,
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          error: error,
+          details: <String, Object?>{
+            'tab_id': tabId,
+            'execution_target': isAlternateSql
+                ? sqlOverrideDescription
+                : 'buffer',
+          },
+        );
       }
     } finally {
       _safeNotify();
@@ -615,6 +842,18 @@ class WorkspaceController extends ChangeNotifier {
       notify: false,
     );
     _safeNotify();
+    final stopwatch = Stopwatch()..start();
+    _logDebug(
+      'fetch_page',
+      'Fetching next result page.',
+      category: 'query',
+      databasePath: databasePath,
+      sql: tab.lastSql ?? tab.sql,
+      details: <String, Object?>{
+        'tab_id': resolvedTabId,
+        'cursor_id': tab.cursorId,
+      },
+    );
 
     try {
       final page = await _gateway.fetchNextPage(
@@ -662,6 +901,17 @@ class WorkspaceController extends ChangeNotifier {
         if (!page.done) {
           return withPlan;
         }
+        _logger.logQueryTiming(
+          databasePath: databasePath ?? '',
+          sql: withPlan.lastSql ?? withPlan.sql,
+          rowCount: withPlan.resultRows.length,
+          rowsAffected: withPlan.rowsAffected,
+          elapsedNanos: _durationToNanos(withPlan.elapsed ?? page.elapsed),
+          details: <String, Object?>{
+            'tab_id': resolvedTabId,
+            'completed_via_fetch': true,
+          },
+        );
         return withPlan.copyWith(
           queryHistory: _appendQueryHistory(
             withPlan.queryHistory,
@@ -714,6 +964,16 @@ class WorkspaceController extends ChangeNotifier {
             ),
           );
         }, notify: false);
+        _logError(
+          'fetch_page',
+          'Fetching the next query page failed.',
+          category: 'query',
+          databasePath: databasePath,
+          sql: tab.lastSql ?? tab.sql,
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          error: error,
+          details: <String, Object?>{'tab_id': resolvedTabId},
+        );
       }
     } finally {
       _safeNotify();
@@ -727,6 +987,8 @@ class WorkspaceController extends ChangeNotifier {
     if (tab == null || !tab.canCancel) {
       return;
     }
+
+    final stopwatch = Stopwatch()..start();
 
     final generation = tab.executionGeneration + 1;
     final hasPartialRows = tab.resultRows.isNotEmpty;
@@ -745,6 +1007,14 @@ class WorkspaceController extends ChangeNotifier {
       notify: false,
     );
     _safeNotify();
+    _logWarning(
+      'cancel_query',
+      'Cancelling active query.',
+      category: 'query',
+      databasePath: databasePath,
+      sql: tab.lastSql ?? tab.sql,
+      details: <String, Object?>{'tab_id': tabId},
+    );
 
     if (cursorId != null) {
       try {
@@ -781,6 +1051,16 @@ class WorkspaceController extends ChangeNotifier {
             );
           }, notify: false);
           _safeNotify();
+          _logError(
+            'cancel_query',
+            'Query cancellation failed.',
+            category: 'query',
+            databasePath: databasePath,
+            sql: tab.lastSql ?? tab.sql,
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            error: error,
+            details: <String, Object?>{'tab_id': tabId},
+          );
         }
         return;
       }
@@ -817,6 +1097,18 @@ class WorkspaceController extends ChangeNotifier {
         );
       }, notify: false);
       _safeNotify();
+      _logWarning(
+        'cancel_query',
+        'Query cancellation completed.',
+        category: 'query',
+        databasePath: databasePath,
+        sql: tab.lastSql ?? tab.sql,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'tab_id': tabId,
+          'partial_results': hasPartialRows,
+        },
+      );
     }
   }
 
@@ -827,6 +1119,8 @@ class WorkspaceController extends ChangeNotifier {
     if (tab == null) {
       return;
     }
+
+    final stopwatch = Stopwatch()..start();
 
     final exportPath = tab.exportPath.trim().isEmpty
         ? suggestExportPath(tabId)
@@ -867,6 +1161,14 @@ class WorkspaceController extends ChangeNotifier {
       notify: false,
     );
     _safeNotify();
+    _logInfo(
+      'export_csv',
+      'Exporting query results to CSV.',
+      category: 'export',
+      databasePath: databasePath,
+      sql: tab.lastSql,
+      details: <String, Object?>{'tab_id': tabId, 'path': exportPath},
+    );
 
     try {
       final result = await _gateway.exportCsv(
@@ -890,6 +1192,16 @@ class WorkspaceController extends ChangeNotifier {
           ),
         );
       }, notify: false);
+      _logInfo(
+        'export_csv',
+        'CSV export completed.',
+        category: 'export',
+        databasePath: databasePath,
+        sql: tab.lastSql,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        rowCount: result.rowCount,
+        details: <String, Object?>{'tab_id': tabId, 'path': result.path},
+      );
     } catch (error) {
       _mutateTab(tabId, (current) {
         final failure = QueryErrorDetails.fromError(
@@ -907,6 +1219,16 @@ class WorkspaceController extends ChangeNotifier {
           ),
         );
       }, notify: false);
+      _logError(
+        'export_csv',
+        'CSV export failed.',
+        category: 'export',
+        databasePath: databasePath,
+        sql: tab.lastSql,
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'tab_id': tabId, 'path': exportPath},
+      );
     } finally {
       _safeNotify();
     }
@@ -1018,10 +1340,26 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> reloadConfig() async {
     try {
       config = await _configStore.load();
+      _logger.updateMinimumLevel(config.logging.verbosity);
       workspaceError = null;
+      _logInfo(
+        'reload_config',
+        'Reloaded application configuration.',
+        category: 'config',
+        details: <String, Object?>{
+          'theme_id': config.appearance.activeTheme,
+          'verbosity': config.logging.verbosity.name,
+        },
+      );
       _safeNotify();
     } catch (error) {
       _setWorkspaceError(error.toString());
+      _logError(
+        'reload_config',
+        'Reloading application configuration failed.',
+        category: 'config',
+        error: error,
+      );
     }
   }
 
@@ -1037,6 +1375,19 @@ class WorkspaceController extends ChangeNotifier {
       shellPreferences: next.shellPreferences.normalized(),
     );
     await _persistConfig(statusMessage ?? 'Updated application preferences.');
+    _logger.updateMinimumLevel(config.logging.verbosity);
+    if (workspaceError == null) {
+      _logInfo(
+        'apply_config',
+        'Applied application configuration changes.',
+        category: 'config',
+        details: <String, Object?>{
+          'theme_id': config.appearance.activeTheme,
+          'verbosity': config.logging.verbosity.name,
+          'show_line_numbers': config.editorSettings.showLineNumbers,
+        },
+      );
+    }
     return workspaceError == null;
   }
 
@@ -1049,6 +1400,12 @@ class WorkspaceController extends ChangeNotifier {
               : _suggestImportTargetPath(trimmedSource),
         );
     _safeNotify();
+    _logInfo(
+      'begin_excel_import',
+      'Opened Excel import workflow.',
+      category: 'import.excel',
+      details: <String, Object?>{'source_path': trimmedSource},
+    );
     if (trimmedSource.isNotEmpty) {
       unawaited(loadExcelImportSource(trimmedSource));
     }
@@ -1064,6 +1421,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> loadExcelImportSource(String rawPath) async {
+    final stopwatch = Stopwatch()..start();
     final normalized = rawPath.trim();
     if (normalized.isEmpty) {
       _setExcelImportError('Choose an Excel workbook first.');
@@ -1110,9 +1468,29 @@ class WorkspaceController extends ChangeNotifier {
             ? 'No worksheets were found in the selected workbook.'
             : null,
       );
+      _logInfo(
+        'inspect_excel_source',
+        'Loaded Excel import inspection.',
+        category: 'import.excel',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'source_path': inspection.sourcePath,
+          'sheet_count': inspection.sheets.length,
+          'warning_count': inspection.warnings.length,
+          'header_row': inspection.headerRow,
+        },
+      );
       _safeNotify();
     } catch (error) {
       _setExcelImportError(error.toString(), phase: ExcelImportJobPhase.failed);
+      _logError(
+        'inspect_excel_source',
+        'Excel source inspection failed.',
+        category: 'import.excel',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'source_path': normalized},
+      );
     }
   }
 
@@ -1260,6 +1638,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> runExcelImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = excelImportSession;
     if (session == null) {
       return;
@@ -1309,6 +1688,17 @@ class WorkspaceController extends ChangeNotifier {
       ),
     );
     _safeNotify();
+    _logInfo(
+      'run_excel_import',
+      'Starting Excel import.',
+      category: 'import.excel',
+      details: <String, Object?>{
+        'job_id': jobId,
+        'source_path': request.sourcePath,
+        'target_path': request.targetPath,
+        'sheet_count': request.selectedSheets.length,
+      },
+    );
 
     _excelImportSubscription = _gateway.importExcel(request: request).listen((
       update,
@@ -1337,6 +1727,17 @@ class WorkspaceController extends ChangeNotifier {
           );
           workspaceMessage = update.summary?.statusMessage;
           workspaceError = null;
+          _logInfo(
+            'run_excel_import',
+            'Excel import completed.',
+            category: 'import.excel',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{
+              'job_id': update.jobId,
+              'target_path': update.summary?.targetPath,
+              'imported_tables': update.summary?.importedTables.length ?? 0,
+            },
+          );
           break;
         case ExcelImportUpdateKind.cancelled:
           excelImportSession = current.copyWith(
@@ -1347,12 +1748,29 @@ class WorkspaceController extends ChangeNotifier {
           );
           workspaceMessage = update.summary?.statusMessage;
           workspaceError = null;
+          _logWarning(
+            'run_excel_import',
+            'Excel import was cancelled.',
+            category: 'import.excel',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{'job_id': update.jobId},
+          );
           break;
         case ExcelImportUpdateKind.failed:
           excelImportSession = current.copyWith(
             step: ExcelImportWizardStep.summary,
             phase: ExcelImportJobPhase.failed,
             error: update.message ?? 'Excel import failed.',
+          );
+          _logError(
+            'run_excel_import',
+            'Excel import failed.',
+            category: 'import.excel',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{
+              'job_id': update.jobId,
+              'message': update.message,
+            },
           );
           break;
       }
@@ -1361,6 +1779,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> cancelExcelImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = excelImportSession;
     if (session == null || session.jobId == null) {
       return;
@@ -1370,10 +1789,24 @@ class WorkspaceController extends ChangeNotifier {
       error: null,
     );
     _safeNotify();
+    _logWarning(
+      'cancel_excel_import',
+      'Cancelling Excel import.',
+      category: 'import.excel',
+      details: <String, Object?>{'job_id': session.jobId},
+    );
     try {
       await _gateway.cancelImport(session.jobId!);
     } catch (error) {
       _setExcelImportError(error.toString(), phase: ExcelImportJobPhase.failed);
+      _logError(
+        'cancel_excel_import',
+        'Excel import cancellation failed.',
+        category: 'import.excel',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'job_id': session.jobId},
+      );
     }
   }
 
@@ -1412,6 +1845,12 @@ class WorkspaceController extends ChangeNotifier {
               : _suggestImportTargetPath(trimmedSource),
         );
     _safeNotify();
+    _logInfo(
+      'begin_sql_dump_import',
+      'Opened SQL dump import workflow.',
+      category: 'import.sql_dump',
+      details: <String, Object?>{'source_path': trimmedSource},
+    );
     if (trimmedSource.isNotEmpty) {
       unawaited(loadSqlDumpImportSource(trimmedSource));
     }
@@ -1427,6 +1866,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> loadSqlDumpImportSource(String rawPath) async {
+    final stopwatch = Stopwatch()..start();
     final normalized = rawPath.trim();
     if (normalized.isEmpty) {
       _setSqlDumpImportError('Choose a SQL dump file first.');
@@ -1476,11 +1916,32 @@ class WorkspaceController extends ChangeNotifier {
             ? 'No supported CREATE TABLE statements were parsed from the selected dump.'
             : null,
       );
+      _logInfo(
+        'inspect_sql_dump_source',
+        'Loaded SQL dump inspection.',
+        category: 'import.sql_dump',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'source_path': inspection.sourcePath,
+          'table_count': inspection.tables.length,
+          'warning_count': inspection.warnings.length,
+          'skipped_statement_count': inspection.skippedStatements.length,
+          'encoding': inspection.resolvedEncoding,
+        },
+      );
       _safeNotify();
     } catch (error) {
       _setSqlDumpImportError(
         error.toString(),
         phase: SqlDumpImportJobPhase.failed,
+      );
+      _logError(
+        'inspect_sql_dump_source',
+        'SQL dump inspection failed.',
+        category: 'import.sql_dump',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'source_path': normalized},
       );
     }
   }
@@ -1629,6 +2090,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> runSqlDumpImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = sqlDumpImportSession;
     if (session == null) {
       return;
@@ -1678,6 +2140,17 @@ class WorkspaceController extends ChangeNotifier {
       ),
     );
     _safeNotify();
+    _logInfo(
+      'run_sql_dump_import',
+      'Starting SQL dump import.',
+      category: 'import.sql_dump',
+      details: <String, Object?>{
+        'job_id': jobId,
+        'source_path': request.sourcePath,
+        'target_path': request.targetPath,
+        'table_count': request.selectedTables.length,
+      },
+    );
 
     _sqlDumpImportSubscription = _gateway
         .importSqlDump(request: request)
@@ -1706,6 +2179,17 @@ class WorkspaceController extends ChangeNotifier {
               );
               workspaceMessage = update.summary?.statusMessage;
               workspaceError = null;
+              _logInfo(
+                'run_sql_dump_import',
+                'SQL dump import completed.',
+                category: 'import.sql_dump',
+                elapsedNanos: _durationToNanos(stopwatch.elapsed),
+                details: <String, Object?>{
+                  'job_id': update.jobId,
+                  'target_path': update.summary?.targetPath,
+                  'imported_tables': update.summary?.importedTables.length ?? 0,
+                },
+              );
               break;
             case SqlDumpImportUpdateKind.cancelled:
               sqlDumpImportSession = current.copyWith(
@@ -1716,12 +2200,29 @@ class WorkspaceController extends ChangeNotifier {
               );
               workspaceMessage = update.summary?.statusMessage;
               workspaceError = null;
+              _logWarning(
+                'run_sql_dump_import',
+                'SQL dump import was cancelled.',
+                category: 'import.sql_dump',
+                elapsedNanos: _durationToNanos(stopwatch.elapsed),
+                details: <String, Object?>{'job_id': update.jobId},
+              );
               break;
             case SqlDumpImportUpdateKind.failed:
               sqlDumpImportSession = current.copyWith(
                 step: SqlDumpImportWizardStep.summary,
                 phase: SqlDumpImportJobPhase.failed,
                 error: update.message ?? 'SQL dump import failed.',
+              );
+              _logError(
+                'run_sql_dump_import',
+                'SQL dump import failed.',
+                category: 'import.sql_dump',
+                elapsedNanos: _durationToNanos(stopwatch.elapsed),
+                details: <String, Object?>{
+                  'job_id': update.jobId,
+                  'message': update.message,
+                },
               );
               break;
           }
@@ -1730,6 +2231,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> cancelSqlDumpImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = sqlDumpImportSession;
     if (session == null || session.jobId == null) {
       return;
@@ -1739,12 +2241,26 @@ class WorkspaceController extends ChangeNotifier {
       error: null,
     );
     _safeNotify();
+    _logWarning(
+      'cancel_sql_dump_import',
+      'Cancelling SQL dump import.',
+      category: 'import.sql_dump',
+      details: <String, Object?>{'job_id': session.jobId},
+    );
     try {
       await _gateway.cancelImport(session.jobId!);
     } catch (error) {
       _setSqlDumpImportError(
         error.toString(),
         phase: SqlDumpImportJobPhase.failed,
+      );
+      _logError(
+        'cancel_sql_dump_import',
+        'SQL dump import cancellation failed.',
+        category: 'import.sql_dump',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'job_id': session.jobId},
       );
     }
   }
@@ -1784,6 +2300,12 @@ class WorkspaceController extends ChangeNotifier {
               : _suggestImportTargetPath(trimmedSource),
         );
     _safeNotify();
+    _logInfo(
+      'begin_sqlite_import',
+      'Opened SQLite import workflow.',
+      category: 'import.sqlite',
+      details: <String, Object?>{'source_path': trimmedSource},
+    );
     if (trimmedSource.isNotEmpty) {
       unawaited(loadSqliteImportSource(trimmedSource));
     }
@@ -1799,6 +2321,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> loadSqliteImportSource(String rawPath) async {
+    final stopwatch = Stopwatch()..start();
     final normalized = rawPath.trim();
     if (normalized.isEmpty) {
       _setSqliteImportError('Choose a SQLite source file first.');
@@ -1842,6 +2365,17 @@ class WorkspaceController extends ChangeNotifier {
             ? 'No user tables were found in the selected SQLite file.'
             : null,
       );
+      _logInfo(
+        'inspect_sqlite_source',
+        'Loaded SQLite source inspection.',
+        category: 'import.sqlite',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: <String, Object?>{
+          'source_path': inspection.sourcePath,
+          'table_count': inspection.tables.length,
+          'warning_count': inspection.warnings.length,
+        },
+      );
       _safeNotify();
       if (focused != null) {
         await loadSqliteImportPreview(focused);
@@ -1850,6 +2384,14 @@ class WorkspaceController extends ChangeNotifier {
       _setSqliteImportError(
         error.toString(),
         phase: SqliteImportJobPhase.failed,
+      );
+      _logError(
+        'inspect_sqlite_source',
+        'SQLite source inspection failed.',
+        category: 'import.sqlite',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'source_path': normalized},
       );
     }
   }
@@ -2037,6 +2579,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> runSqliteImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = sqliteImportSession;
     if (session == null) {
       return;
@@ -2085,6 +2628,17 @@ class WorkspaceController extends ChangeNotifier {
       ),
     );
     _safeNotify();
+    _logInfo(
+      'run_sqlite_import',
+      'Starting SQLite import.',
+      category: 'import.sqlite',
+      details: <String, Object?>{
+        'job_id': jobId,
+        'source_path': request.sourcePath,
+        'target_path': request.targetPath,
+        'table_count': request.selectedTables.length,
+      },
+    );
 
     _sqliteImportSubscription = _gateway.importSqlite(request: request).listen((
       update,
@@ -2113,6 +2667,17 @@ class WorkspaceController extends ChangeNotifier {
           );
           workspaceMessage = update.summary?.statusMessage;
           workspaceError = null;
+          _logInfo(
+            'run_sqlite_import',
+            'SQLite import completed.',
+            category: 'import.sqlite',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{
+              'job_id': update.jobId,
+              'target_path': update.summary?.targetPath,
+              'imported_tables': update.summary?.importedTables.length ?? 0,
+            },
+          );
           break;
         case SqliteImportUpdateKind.cancelled:
           sqliteImportSession = current.copyWith(
@@ -2123,12 +2688,29 @@ class WorkspaceController extends ChangeNotifier {
           );
           workspaceMessage = update.summary?.statusMessage;
           workspaceError = null;
+          _logWarning(
+            'run_sqlite_import',
+            'SQLite import was cancelled.',
+            category: 'import.sqlite',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{'job_id': update.jobId},
+          );
           break;
         case SqliteImportUpdateKind.failed:
           sqliteImportSession = current.copyWith(
             step: SqliteImportWizardStep.summary,
             phase: SqliteImportJobPhase.failed,
             error: update.message ?? 'SQLite import failed.',
+          );
+          _logError(
+            'run_sqlite_import',
+            'SQLite import failed.',
+            category: 'import.sqlite',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{
+              'job_id': update.jobId,
+              'message': update.message,
+            },
           );
           break;
       }
@@ -2137,6 +2719,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> cancelSqliteImport() async {
+    final stopwatch = Stopwatch()..start();
     final session = sqliteImportSession;
     if (session == null || session.jobId == null) {
       return;
@@ -2146,12 +2729,26 @@ class WorkspaceController extends ChangeNotifier {
       error: null,
     );
     _safeNotify();
+    _logWarning(
+      'cancel_sqlite_import',
+      'Cancelling SQLite import.',
+      category: 'import.sqlite',
+      details: <String, Object?>{'job_id': session.jobId},
+    );
     try {
       await _gateway.cancelImport(session.jobId!);
     } catch (error) {
       _setSqliteImportError(
         error.toString(),
         phase: SqliteImportJobPhase.failed,
+      );
+      _logError(
+        'cancel_sqlite_import',
+        'SQLite import cancellation failed.',
+        category: 'import.sqlite',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{'job_id': session.jobId},
       );
     }
   }
@@ -2354,6 +2951,15 @@ class WorkspaceController extends ChangeNotifier {
         notify: false,
       );
       _safeNotify();
+      _logWarning(
+        'load_execution_plan',
+        'Execution plan could not be loaded.',
+        category: 'query',
+        databasePath: databasePath,
+        sql: sql,
+        error: error,
+        details: <String, Object?>{'tab_id': tabId},
+      );
     }
   }
 
@@ -2477,12 +3083,25 @@ class WorkspaceController extends ChangeNotifier {
       notify: false,
     );
     _safeNotify();
+    _logError(
+      'tab_error',
+      error.message,
+      category: 'query',
+      databasePath: databasePath,
+      details: <String, Object?>{
+        'tab_id': tabId,
+        'stage': error.stage.name,
+        if (error.code != null) 'code': error.code,
+        if (error.location != null) 'location': error.location!.shortLabel,
+      },
+    );
   }
 
   void _setWorkspaceError(String message) {
     workspaceError = message;
     workspaceMessage = null;
     _safeNotify();
+    _logError('workspace_error', message, databasePath: databasePath);
   }
 
   String? _validateAppConfig(AppConfig next) {
@@ -2535,9 +3154,24 @@ class WorkspaceController extends ChangeNotifier {
         workspaceMessage = statusMessage;
         workspaceError = null;
       }
+      _logInfo(
+        'persist_config',
+        'Persisted application configuration.',
+        category: 'config',
+        details: <String, Object?>{
+          'theme_id': config.appearance.activeTheme,
+          'verbosity': config.logging.verbosity.name,
+        },
+      );
     } catch (error) {
       workspaceError = error.toString();
       workspaceMessage = null;
+      _logError(
+        'persist_config',
+        'Persisting application configuration failed.',
+        category: 'config',
+        error: error,
+      );
     } finally {
       _safeNotify();
     }
@@ -2549,6 +3183,7 @@ class WorkspaceController extends ChangeNotifier {
       workspaceError = message;
       workspaceMessage = null;
       _safeNotify();
+      _logError('sql_dump_import_error', message, category: 'import.sql_dump');
       return;
     }
     sqlDumpImportSession = session.copyWith(
@@ -2556,6 +3191,15 @@ class WorkspaceController extends ChangeNotifier {
       phase: phase ?? session.phase,
     );
     _safeNotify();
+    _logError(
+      'sql_dump_import_error',
+      message,
+      category: 'import.sql_dump',
+      details: <String, Object?>{
+        'phase': (phase ?? session.phase).name,
+        'source_path': session.sourcePath,
+      },
+    );
   }
 
   void _setExcelImportError(String message, {ExcelImportJobPhase? phase}) {
@@ -2564,6 +3208,7 @@ class WorkspaceController extends ChangeNotifier {
       workspaceError = message;
       workspaceMessage = null;
       _safeNotify();
+      _logError('excel_import_error', message, category: 'import.excel');
       return;
     }
     excelImportSession = session.copyWith(
@@ -2571,6 +3216,15 @@ class WorkspaceController extends ChangeNotifier {
       phase: phase ?? session.phase,
     );
     _safeNotify();
+    _logError(
+      'excel_import_error',
+      message,
+      category: 'import.excel',
+      details: <String, Object?>{
+        'phase': (phase ?? session.phase).name,
+        'source_path': session.sourcePath,
+      },
+    );
   }
 
   void _setSqliteImportError(String message, {SqliteImportJobPhase? phase}) {
@@ -2579,6 +3233,7 @@ class WorkspaceController extends ChangeNotifier {
       workspaceError = message;
       workspaceMessage = null;
       _safeNotify();
+      _logError('sqlite_import_error', message, category: 'import.sqlite');
       return;
     }
     sqliteImportSession = session.copyWith(
@@ -2586,6 +3241,15 @@ class WorkspaceController extends ChangeNotifier {
       phase: phase ?? session.phase,
     );
     _safeNotify();
+    _logError(
+      'sqlite_import_error',
+      message,
+      category: 'import.sqlite',
+      details: <String, Object?>{
+        'phase': (phase ?? session.phase).name,
+        'source_path': session.sourcePath,
+      },
+    );
   }
 
   void _mutateSqlDumpImportTable(

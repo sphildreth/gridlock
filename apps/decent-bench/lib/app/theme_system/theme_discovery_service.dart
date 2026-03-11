@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
 
+import '../app_support_paths.dart';
 import 'built_in_theme_assets.dart';
 import 'decent_bench_theme.dart';
 import 'theme_parser.dart';
@@ -140,32 +140,7 @@ class ThemeDiscoveryService {
     if (trimmed != null && trimmed.isNotEmpty) {
       return trimmed;
     }
-
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    if (Platform.isLinux) {
-      return p.join(
-        Platform.environment['XDG_CONFIG_HOME'] ?? p.join(home, '.config'),
-        'decent-bench',
-        'themes',
-      );
-    }
-    if (Platform.isMacOS) {
-      return p.join(
-        home,
-        'Library',
-        'Application Support',
-        'Decent Bench',
-        'themes',
-      );
-    }
-    if (Platform.isWindows) {
-      return p.join(
-        Platform.environment['APPDATA'] ?? p.join(home, 'AppData', 'Roaming'),
-        'Decent Bench',
-        'themes',
-      );
-    }
-    return p.join(home, '.decent-bench', 'themes');
+    return AppSupportPaths.resolveThemesDirectoryPath();
   }
 
   Future<void> _loadBuiltInTheme({

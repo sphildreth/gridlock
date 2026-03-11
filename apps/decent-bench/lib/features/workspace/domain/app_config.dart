@@ -59,18 +59,21 @@ class EditorSettings {
   static const int defaultAutocompleteMaxSuggestions = 12;
   static const bool defaultFormatUppercaseKeywords = true;
   static const int defaultIndentSpaces = 2;
+  static const bool defaultShowLineNumbers = true;
 
   const EditorSettings({
     required this.autocompleteEnabled,
     required this.autocompleteMaxSuggestions,
     required this.formatUppercaseKeywords,
     required this.indentSpaces,
+    required this.showLineNumbers,
   });
 
   final bool autocompleteEnabled;
   final int autocompleteMaxSuggestions;
   final bool formatUppercaseKeywords;
   final int indentSpaces;
+  final bool showLineNumbers;
 
   factory EditorSettings.defaults() {
     return const EditorSettings(
@@ -78,6 +81,7 @@ class EditorSettings {
       autocompleteMaxSuggestions: defaultAutocompleteMaxSuggestions,
       formatUppercaseKeywords: defaultFormatUppercaseKeywords,
       indentSpaces: defaultIndentSpaces,
+      showLineNumbers: defaultShowLineNumbers,
     );
   }
 
@@ -86,6 +90,7 @@ class EditorSettings {
     int? autocompleteMaxSuggestions,
     bool? formatUppercaseKeywords,
     int? indentSpaces,
+    bool? showLineNumbers,
   }) {
     return EditorSettings(
       autocompleteEnabled: autocompleteEnabled ?? this.autocompleteEnabled,
@@ -94,7 +99,46 @@ class EditorSettings {
       formatUppercaseKeywords:
           formatUppercaseKeywords ?? this.formatUppercaseKeywords,
       indentSpaces: indentSpaces ?? this.indentSpaces,
+      showLineNumbers: showLineNumbers ?? this.showLineNumbers,
     );
+  }
+}
+
+enum LogVerbosity {
+  debug(0, 'Debug'),
+  information(1, 'Information'),
+  warning(2, 'Warning'),
+  error(3, 'Errors');
+
+  const LogVerbosity(this.value, this.label);
+
+  final int value;
+  final String label;
+
+  String get tomlValue => name;
+
+  static LogVerbosity parse(String raw) {
+    final normalized = raw.trim().toLowerCase();
+    for (final value in LogVerbosity.values) {
+      if (value.name == normalized || value.label.toLowerCase() == normalized) {
+        return value;
+      }
+    }
+    return LogVerbosity.warning;
+  }
+}
+
+class LoggingSettings {
+  const LoggingSettings({required this.verbosity});
+
+  final LogVerbosity verbosity;
+
+  factory LoggingSettings.defaults() {
+    return const LoggingSettings(verbosity: LogVerbosity.warning);
+  }
+
+  LoggingSettings copyWith({LogVerbosity? verbosity}) {
+    return LoggingSettings(verbosity: verbosity ?? this.verbosity);
   }
 }
 
@@ -142,6 +186,7 @@ class AppConfig {
   const AppConfig({
     required this.configVersion,
     required this.appearance,
+    required this.logging,
     required this.recentFiles,
     required this.defaultPageSize,
     required this.csvDelimiter,
@@ -154,6 +199,7 @@ class AppConfig {
 
   final int configVersion;
   final AppearanceSettings appearance;
+  final LoggingSettings logging;
   final List<String> recentFiles;
   final int defaultPageSize;
   final String csvDelimiter;
@@ -167,6 +213,7 @@ class AppConfig {
     return AppConfig(
       configVersion: currentConfigVersion,
       appearance: AppearanceSettings.defaults(),
+      logging: LoggingSettings.defaults(),
       recentFiles: const <String>[],
       defaultPageSize: defaultPageSizeValue,
       csvDelimiter: defaultCsvDelimiter,
@@ -181,6 +228,7 @@ class AppConfig {
   AppConfig copyWith({
     int? configVersion,
     AppearanceSettings? appearance,
+    LoggingSettings? logging,
     List<String>? recentFiles,
     int? defaultPageSize,
     String? csvDelimiter,
@@ -193,6 +241,7 @@ class AppConfig {
     return AppConfig(
       configVersion: configVersion ?? this.configVersion,
       appearance: appearance ?? this.appearance,
+      logging: logging ?? this.logging,
       recentFiles: recentFiles ?? this.recentFiles,
       defaultPageSize: defaultPageSize ?? this.defaultPageSize,
       csvDelimiter: csvDelimiter ?? this.csvDelimiter,
@@ -249,6 +298,7 @@ class AppConfig {
         'editor_format_uppercase_keywords = ${editorSettings.formatUppercaseKeywords}',
       )
       ..writeln('editor_indent_spaces = ${editorSettings.indentSpaces}')
+      ..writeln('editor_show_line_numbers = ${editorSettings.showLineNumbers}')
       ..writeln('editor_snippet_count = ${snippets.length}')
       ..writeln()
       ..writeln('[appearance]')
@@ -260,6 +310,10 @@ class AppConfig {
     }
 
     buffer
+      ..writeln()
+      ..writeln('[logging]')
+      ..writeln('verbosity = ${jsonEncode(logging.verbosity.tomlValue)}')
+      ..writeln()
       ..writeln()
       ..writeln('[layout]')
       ..writeln(
@@ -386,6 +440,16 @@ class AppConfig {
             );
           }
           break;
+        case 'logging.verbosity':
+          final parsed = _decodeJsonString(value);
+          if (parsed != null && parsed.trim().isNotEmpty) {
+            config = config.copyWith(
+              logging: config.logging.copyWith(
+                verbosity: LogVerbosity.parse(parsed),
+              ),
+            );
+          }
+          break;
         case 'default_page_size':
           final parsed = int.tryParse(value);
           if (parsed != null && parsed > 0) {
@@ -448,6 +512,16 @@ class AppConfig {
             config = config.copyWith(
               editorSettings: config.editorSettings.copyWith(
                 indentSpaces: parsed,
+              ),
+            );
+          }
+          break;
+        case 'editor_show_line_numbers':
+          final parsed = _parseBool(value);
+          if (parsed != null) {
+            config = config.copyWith(
+              editorSettings: config.editorSettings.copyWith(
+                showLineNumbers: parsed,
               ),
             );
           }

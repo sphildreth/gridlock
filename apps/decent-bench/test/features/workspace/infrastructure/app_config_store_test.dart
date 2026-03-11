@@ -12,6 +12,7 @@ void main() {
         activeTheme: 'classic-light',
         themesDir: '/tmp/themes',
       ),
+      logging: const LoggingSettings(verbosity: LogVerbosity.debug),
       recentFiles: const <String>['/tmp/a.ddb', '/tmp/b.ddb'],
       defaultPageSize: 250,
       csvDelimiter: ';',
@@ -21,6 +22,7 @@ void main() {
         autocompleteMaxSuggestions: 20,
         formatUppercaseKeywords: false,
         indentSpaces: 4,
+        showLineNumbers: false,
       ),
       shellPreferences: const WorkspaceShellPreferences(
         leftColumnFraction: 0.33,
@@ -54,12 +56,15 @@ void main() {
     expect(toml, contains('editor_snippet_count = 1'));
     expect(toml, contains('[appearance]'));
     expect(toml, contains('active_theme = "classic-light"'));
+    expect(toml, contains('[logging]'));
+    expect(toml, contains('verbosity = "debug"'));
     expect(toml, contains('[layout]'));
     expect(toml, contains('[shortcuts]'));
     expect(toml, contains('[[editor_snippets]]'));
     expect(parsed.configVersion, AppConfig.currentConfigVersion);
     expect(parsed.appearance.activeTheme, 'classic-light');
     expect(parsed.appearance.themesDir, '/tmp/themes');
+    expect(parsed.logging.verbosity, LogVerbosity.debug);
     expect(parsed.recentFiles, config.recentFiles);
     expect(parsed.defaultPageSize, 250);
     expect(parsed.csvDelimiter, ';');
@@ -68,6 +73,7 @@ void main() {
     expect(parsed.editorSettings.autocompleteMaxSuggestions, 20);
     expect(parsed.editorSettings.formatUppercaseKeywords, isFalse);
     expect(parsed.editorSettings.indentSpaces, 4);
+    expect(parsed.editorSettings.showLineNumbers, isFalse);
     expect(parsed.shellPreferences.leftColumnFraction, closeTo(0.33, 0.001));
     expect(parsed.shellPreferences.showPropertiesPane, isFalse);
     expect(parsed.shellPreferences.showStatusBar, isFalse);
@@ -135,6 +141,7 @@ editor_snippets = [{"id":"custom","name":"Custom","trigger":"custom","descriptio
         autocompleteMaxSuggestions: 18,
         formatUppercaseKeywords: false,
         indentSpaces: 4,
+        showLineNumbers: false,
       ),
       shortcutBindings: <String, String>{
         ...AppConfig.defaultShortcutBindings(),
@@ -160,6 +167,7 @@ editor_snippets = [{"id":"custom","name":"Custom","trigger":"custom","descriptio
     expect(loaded.defaultPageSize, 333);
     expect(loaded.csvDelimiter, '|');
     expect(loaded.editorSettings.autocompleteEnabled, isFalse);
+    expect(loaded.editorSettings.showLineNumbers, isFalse);
     expect(loaded.shortcutBindings['tools_run_query'], 'Ctrl+Shift+Enter');
   });
 

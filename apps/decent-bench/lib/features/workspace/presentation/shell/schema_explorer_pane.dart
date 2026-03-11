@@ -39,6 +39,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
 
   @override
   Widget build(BuildContext context) {
+    final showSampleSchema = widget.databasePath == null;
     final databaseLabel = widget.databasePath == null
         ? 'sample.decentdb'
         : p.basename(widget.databasePath!);
@@ -74,7 +75,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   _SectionBranch(
                     nodeId: 'section:tables',
                     title: 'Tables',
-                    count: schema.tables.isEmpty
+                    count: showSampleSchema && schema.tables.isEmpty
                         ? _sampleTables.length
                         : schema.tables.length,
                     icon: Icons.table_chart_outlined,
@@ -83,7 +84,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                     onSelected: widget.onSelectNode,
                     onShowContextMenu: widget.onShowNodeMenu,
                     onExpansionChanged: _setExpanded,
-                    children: schema.tables.isEmpty
+                    children: showSampleSchema && schema.tables.isEmpty
                         ? _buildSampleTableNodes()
                         : <Widget>[
                             for (final object in schema.tables)
@@ -109,7 +110,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   _SectionBranch(
                     nodeId: 'section:views',
                     title: 'Views',
-                    count: schema.views.isEmpty
+                    count: showSampleSchema && schema.views.isEmpty
                         ? _sampleViews.length
                         : schema.views.length,
                     icon: Icons.visibility_outlined,
@@ -118,7 +119,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                     onSelected: widget.onSelectNode,
                     onShowContextMenu: widget.onShowNodeMenu,
                     onExpansionChanged: _setExpanded,
-                    children: schema.views.isEmpty
+                    children: showSampleSchema && schema.views.isEmpty
                         ? _buildSampleViewNodes()
                         : <Widget>[
                             for (final object in schema.views)
@@ -146,7 +147,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                   _SectionBranch(
                     nodeId: 'section:indexes',
                     title: 'Indexes',
-                    count: schema.indexes.isEmpty
+                    count: showSampleSchema && schema.indexes.isEmpty
                         ? _sampleIndexLabels.length
                         : schema.indexes.length,
                     icon: Icons.filter_alt_outlined,
@@ -155,7 +156,7 @@ class _SchemaExplorerPaneState extends State<SchemaExplorerPane> {
                     onSelected: widget.onSelectNode,
                     onShowContextMenu: widget.onShowNodeMenu,
                     onExpansionChanged: _setExpanded,
-                    children: schema.indexes.isEmpty
+                    children: showSampleSchema && schema.indexes.isEmpty
                         ? <Widget>[
                             for (final label in _sampleIndexLabels)
                               _LeafNode(

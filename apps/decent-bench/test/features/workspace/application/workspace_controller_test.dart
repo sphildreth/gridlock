@@ -286,6 +286,7 @@ void main() {
         autocompleteMaxSuggestions: 18,
         formatUppercaseKeywords: false,
         indentSpaces: 4,
+        showLineNumbers: true,
       ),
       shortcutBindings: <String, String>{
         ...controller.config.shortcutBindings,
@@ -425,6 +426,36 @@ void main() {
       );
     },
   );
+
+  test('runActiveTab records query timing log entries', () async {
+    final dbPath =
+        '${Directory.systemTemp.path}/workbench-${DateTime.now().microsecondsSinceEpoch}.ddb';
+    final logger = RecordingAppLogger();
+    final config = AppConfig.defaults().copyWith(
+      logging: const LoggingSettings(verbosity: LogVerbosity.debug),
+    );
+    final controller = WorkspaceController(
+      gateway: FakeWorkspaceGateway(),
+      configStore: InMemoryConfigStore(config),
+      workspaceStateStore: InMemoryWorkspaceStateStore(),
+      logger: logger,
+    );
+    await controller.initialize();
+    await controller.openDatabase(dbPath, createIfMissing: true);
+
+    controller.updateActiveSql('SELECT id, title FROM tasks ORDER BY id');
+    await controller.runActiveTab();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final timingEntry = logger.entries.lastWhere(
+      (entry) => entry.operation == 'query.first_page',
+    );
+    expect(timingEntry.category, 'query');
+    expect(timingEntry.databasePath, dbPath);
+    expect(timingEntry.sql, 'SELECT id, title FROM tasks ORDER BY id');
+    expect(timingEntry.rowCount, 1);
+    expect(timingEntry.elapsedNanos, greaterThan(0));
+  });
 
   test(
     'runActiveSql maps syntax failures back to the selected statement location',

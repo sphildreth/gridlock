@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../app/app_metadata.dart';
 import '../../../app/startup_launch_options.dart';
+import '../../../app/theme_system/theme_manager.dart';
 import '../application/menu_command_registry.dart';
 import '../application/workspace_controller.dart';
 import '../application/workspace_shell_controller.dart';
@@ -44,11 +45,13 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     required this.controller,
+    required this.themeManager,
     this.appLifecycleService = const FlutterAppLifecycleService(),
     this.startupLaunchOptions = const StartupLaunchOptions(),
   });
 
   final WorkspaceController controller;
+  final ThemeManager themeManager;
   final AppLifecycleService appLifecycleService;
   final StartupLaunchOptions startupLaunchOptions;
 
@@ -314,6 +317,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         .config
                                         .editorSettings
                                         .indentSpaces,
+                                    showLineNumbers: controller
+                                        .config
+                                        .editorSettings
+                                        .showLineNumbers,
                                     showFindBar: _showFindBar,
                                     findController: _findController,
                                     findFocusNode: _findFocusNode,
@@ -510,6 +517,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     WorkspaceController controller,
     String nodeId,
   ) {
+    final allowSampleSchema = controller.databasePath == null;
     if (nodeId == 'database') {
       return SchemaSelectionDetails(
         nodeId: nodeId,
@@ -562,7 +570,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       final objectName = nodeId.substring(isTable ? 6 : 5);
       final object = controller.schema.objectNamed(objectName);
       if (object == null) {
-        return _sampleSelectionDetails(nodeId);
+        return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
       }
       final indexes = controller.schema.indexesForObject(object.name);
       return SchemaSelectionDetails(
@@ -609,7 +617,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           );
         }
       }
-      return _sampleSelectionDetails(nodeId);
+      return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
     }
 
     if (nodeId.startsWith('column:')) {
@@ -617,7 +625,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       if (parts.length >= 3) {
         final object = controller.schema.objectNamed(parts[1]);
         if (object == null) {
-          return _sampleSelectionDetails(nodeId);
+          return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
         }
         for (final column in object.columns) {
           if (column.name == parts[2]) {
@@ -641,7 +649,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           }
         }
       }
-      return _sampleSelectionDetails(nodeId);
+      return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
     }
 
     if (nodeId.startsWith('constraint:')) {
@@ -649,7 +657,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       if (parts.length >= 4) {
         final object = controller.schema.objectNamed(parts[1]);
         if (object == null) {
-          return _sampleSelectionDetails(nodeId);
+          return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
         }
         for (final column in object.columns) {
           if (column.name != parts[2]) {
@@ -710,7 +718,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
-    return _sampleSelectionDetails(nodeId);
+    return allowSampleSchema ? _sampleSelectionDetails(nodeId) : null;
   }
 
   SchemaSelectionDetails? _sampleSelectionDetails(String nodeId) {
@@ -2541,33 +2549,46 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       return;
     }
 
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return PreferencesDialog(
-          initialConfig: widget.controller.config,
-          configFilePath: widget.controller.configFilePath,
-          shortcutConfigService: _shortcutConfigService,
-          createSnippetId: widget.controller.createSnippetId,
-          initialSection: initialSection,
-          onSave: (config) async {
-            final saved = await widget.controller.applyAppConfig(
-              config,
-              statusMessage:
-                  'Saved preferences to ${widget.controller.configFilePath}.',
-            );
-            if (saved) {
-              _shellController.replacePreferences(
-                widget.controller.config.shellPreferences,
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return PreferencesDialog(
+            initialConfig: widget.controller.config,
+            configFilePath: widget.controller.configFilePath,
+            shortcutConfigService: _shortcutConfigService,
+            createSnippetId: widget.controller.createSnippetId,
+            availableThemesById: <String, String>{
+              for (final theme in widget.themeManager.availableThemes)
+                theme.id: theme.name,
+            },
+            resolvedThemesDirectory:
+                widget.themeManager.resolvedThemesDirectory,
+            initialSection: initialSection,
+            onPreviewTheme: widget.themeManager.switchTheme,
+            onSave: (config) async {
+              final saved = await widget.controller.applyAppConfig(
+                config,
+                statusMessage:
+                    'Saved preferences to ${widget.controller.configFilePath}.',
               );
-              return null;
-            }
-            return widget.controller.workspaceError ??
-                'Unable to save application preferences.';
-          },
-        );
-      },
-    );
+              if (saved) {
+                _shellController.replacePreferences(
+                  widget.controller.config.shellPreferences,
+                );
+                return null;
+              }
+              return widget.controller.workspaceError ??
+                  'Unable to save application preferences.';
+            },
+          );
+        },
+      );
+    } finally {
+      unawaited(
+        widget.themeManager.loadFromConfig(widget.controller.config.appearance),
+      );
+    }
   }
 
   Future<void> _showAboutDialog() {

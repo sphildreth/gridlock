@@ -24,6 +24,7 @@ class SqlEditorPane extends StatelessWidget {
     required this.snippets,
     required this.zoomFactor,
     required this.indentSpaces,
+    required this.showLineNumbers,
     required this.showFindBar,
     required this.findController,
     required this.findFocusNode,
@@ -70,6 +71,7 @@ class SqlEditorPane extends StatelessWidget {
   final List<SqlSnippet> snippets;
   final double zoomFactor;
   final int indentSpaces;
+  final bool showLineNumbers;
   final bool showFindBar;
   final TextEditingController findController;
   final FocusNode findFocusNode;
@@ -196,13 +198,14 @@ class SqlEditorPane extends StatelessWidget {
                     children: <Widget>[
                       Row(
                         children: <Widget>[
-                          _LineNumberGutter(
-                            lineCount: _lineCount(sqlController.text),
-                            controller: editorScrollController,
-                            zoomFactor: zoomFactor,
-                            errorLineNumber: activeTab.error?.location?.line,
-                            errorMessage: errorMessage,
-                          ),
+                          if (showLineNumbers)
+                            _LineNumberGutter(
+                              lineCount: _lineCount(sqlController.text),
+                              controller: editorScrollController,
+                              zoomFactor: zoomFactor,
+                              errorLineNumber: activeTab.error?.location?.line,
+                              errorMessage: errorMessage,
+                            ),
                           Expanded(
                             child: Shortcuts(
                               shortcuts: autocompleteResult.isEmpty
@@ -264,6 +267,7 @@ class SqlEditorPane extends StatelessWidget {
                           editorTextStyle: editorStyle,
                           editorText: sqlController.text,
                           selection: sqlController.selection,
+                          showLineNumbers: showLineNumbers,
                           editorScrollOffset: editorScrollController.hasClients
                               ? editorScrollController.offset
                               : 0,
@@ -600,6 +604,7 @@ class _LineNumberGutter extends StatelessWidget {
     final lineHeight =
         (tokens.fonts.editorSize * zoomFactor) * tokens.fonts.lineHeight;
     return Container(
+      key: const ValueKey<String>('sql_editor.gutter'),
       width: kSqlEditorGutterWidth,
       color: tokens.editor.gutterBackground,
       child: ClipRect(
@@ -681,6 +686,7 @@ class _AutocompletePopup extends StatelessWidget {
     required this.editorTextStyle,
     required this.editorText,
     required this.selection,
+    required this.showLineNumbers,
     required this.editorScrollOffset,
     required this.maxWidth,
     required this.maxHeight,
@@ -692,6 +698,7 @@ class _AutocompletePopup extends StatelessWidget {
   final TextStyle editorTextStyle;
   final String editorText;
   final TextSelection selection;
+  final bool showLineNumbers;
   final double editorScrollOffset;
   final double maxWidth;
   final double maxHeight;
@@ -827,7 +834,7 @@ class _AutocompletePopup extends StatelessWidget {
     final charWidth = textPainter.width;
 
     final rawLeft =
-        kSqlEditorGutterWidth +
+        (showLineNumbers ? kSqlEditorGutterWidth : 0) +
         kSqlEditorContentPadding.left +
         (columnIndex * charWidth);
     final rawTop =

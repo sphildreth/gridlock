@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../../app/app_support_paths.dart';
 import '../domain/workspace_state.dart';
 
 abstract class WorkspaceStateStore {
@@ -52,36 +53,6 @@ class FileWorkspaceStateStore implements WorkspaceStateStore {
   }
 
   Directory _defaultRootDirectory() {
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    if (Platform.isLinux) {
-      return Directory(
-        p.join(
-          Platform.environment['XDG_CONFIG_HOME'] ?? p.join(home, '.config'),
-          'decent-bench',
-          'workspaces',
-        ),
-      );
-    }
-    if (Platform.isMacOS) {
-      return Directory(
-        p.join(
-          home,
-          'Library',
-          'Application Support',
-          'Decent Bench',
-          'workspaces',
-        ),
-      );
-    }
-    if (Platform.isWindows) {
-      return Directory(
-        p.join(
-          Platform.environment['APPDATA'] ?? p.join(home, 'AppData', 'Roaming'),
-          'Decent Bench',
-          'workspaces',
-        ),
-      );
-    }
-    return Directory(p.join(home, '.decent-bench', 'workspaces'));
+    return Directory(AppSupportPaths.resolveWorkspaceStateDirectoryPath());
   }
 }

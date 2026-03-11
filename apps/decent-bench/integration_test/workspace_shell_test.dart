@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:decent_bench/app/app.dart';
+import 'package:decent_bench/app/logging/app_logger.dart';
 import 'package:decent_bench/features/workspace/application/workspace_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,7 +30,11 @@ void main() {
 
     await controller.initialize();
     await tester.pumpWidget(
-      DecentBenchApp(controller: controller, autoInitialize: false),
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -66,7 +71,11 @@ void main() {
     controller.updateActiveSql('SELECT id, title FROM tasks ORDER BY id');
 
     await tester.pumpWidget(
-      DecentBenchApp(controller: controller, autoInitialize: false),
+      DecentBenchApp(
+        controller: controller,
+        autoInitialize: false,
+        logger: const NoOpAppLogger(),
+      ),
     );
     await tester.pumpAndSettle();
 
