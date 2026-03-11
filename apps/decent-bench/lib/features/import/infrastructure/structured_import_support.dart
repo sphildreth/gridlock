@@ -210,7 +210,7 @@ List<MaterializedImportTableData> _normalizeToTables({
   final collector = _NormalizedTableCollector();
   final records = _recordsFromStructuredRoot(source);
   for (final record in records) {
-    collector.addRecord(rootName, record, parentId: null);
+    collector.addRecord(rootName, record);
   }
   return collector.buildDrafts();
 }
@@ -271,12 +271,36 @@ class _NormalizedTableCollector {
   final Map<String, List<Map<String, Object?>>> _rowsByTable =
       <String, List<Map<String, Object?>>>{};
   final Map<String, String> _descriptions = <String, String>{};
+  final Map<String, String> _primaryKeyColumns = <String, String>{};
+  final Map<String, MaterializedImportParentRelation> _parentRelations =
+      <String, MaterializedImportParentRelation>{};
   int _nextId = 1;
 
-  void addRecord(String tableName, dynamic raw, {int? parentId}) {
+  void addRecord(
+    String tableName,
+    dynamic raw, {
+    String? parentTableName,
+    int? parentId,
+  }) {
+    _primaryKeyColumns.putIfAbsent(tableName, () => '_import_id');
+    if (parentTableName != null) {
+      _parentRelations.putIfAbsent(
+        tableName,
+        () => MaterializedImportParentRelation(
+          parentSourceId: parentTableName,
+          childSourceColumn: 'parent_id',
+          parentSourceColumn: '_import_id',
+        ),
+      );
+    }
     if (raw is List) {
       for (final item in raw) {
-        addRecord(tableName, item, parentId: parentId);
+        addRecord(
+          tableName,
+          item,
+          parentTableName: parentTableName,
+          parentId: parentId,
+        );
       }
       return;
     }
@@ -319,7 +343,12 @@ class _NormalizedTableCollector {
           : 'Normalized table with child tables linked by `parent_id`.';
       final rowId = row['_import_id'] as int;
       for (final child in childCollections) {
-        addRecord('${tableName}_${child.key}', child.value, parentId: rowId);
+        addRecord(
+          '${tableName}_${child.key}',
+          child.value,
+          parentTableName: tableName,
+          parentId: rowId,
+        );
       }
       return;
     }
@@ -342,6 +371,8 @@ class _NormalizedTableCollector {
           suggestedTargetName: entry.key,
           rows: entry.value,
           description: _descriptions[entry.key],
+          primaryKeySourceColumn: _primaryKeyColumns[entry.key],
+          parentRelation: _parentRelations[entry.key],
         ),
       );
     }

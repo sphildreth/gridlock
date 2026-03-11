@@ -238,14 +238,18 @@ Future<GenericImportSummary> _runGenericImport({
     }
   }
 
+  final warnings = <String>[...materialized.warnings];
+  final materializedBySourceId = <String, MaterializedImportTableData>{
+    for (final table in materialized.tables) table.sourceId: table,
+  };
   final resolvedTables = <_ResolvedImportTable>[];
   for (final draft in selectedDrafts) {
-    final source = materialized.tables.firstWhere(
-      (table) => table.sourceId == draft.sourceId,
-      orElse: () => throw StateError(
+    final source = materializedBySourceId[draft.sourceId];
+    if (source == null) {
+      throw StateError(
         'Source table `${draft.sourceName}` is no longer available for import.',
-      ),
-    );
+      );
+    }
     if (!hasDistinctNames(draft.columns.map((column) => column.targetName))) {
       throw StateError(
         'Column names in `${draft.targetName}` must be distinct.',
@@ -258,19 +262,44 @@ Future<GenericImportSummary> _runGenericImport({
         targetName: draft.targetName,
         rows: source.rows,
         columns: draft.columns,
+        primaryKeyTargetColumn: _resolveTargetColumnName(
+          draft.columns,
+          source.primaryKeySourceColumn,
+        ),
+        pendingParentRelation: source.parentRelation == null
+            ? null
+            : _PendingResolvedForeignKey(
+                parentSourceId: source.parentRelation!.parentSourceId,
+                childTargetColumn: _resolveTargetColumnName(
+                  draft.columns,
+                  source.parentRelation!.childSourceColumn,
+                )!,
+                parentSourceColumn: source.parentRelation!.parentSourceColumn,
+              ),
       ),
     );
   }
+  final resolvedBySourceId = <String, _ResolvedImportTable>{
+    for (final table in resolvedTables) table.sourceId: table,
+  };
+  final finalizedTables = <_ResolvedImportTable>[
+    for (final table in resolvedTables)
+      _finalizeResolvedImportTable(
+        table,
+        resolvedBySourceId: resolvedBySourceId,
+        warnings: warnings,
+      ),
+  ];
+  final orderedTables = _orderResolvedImportTables(finalizedTables);
 
   final database = Database.open(request.targetPath, libraryPath: libraryPath);
   var transactionOpen = false;
-  final warnings = <String>[...materialized.warnings];
   final rowsCopiedByTable = <String, int>{};
   final typeInferenceService = const TypeInferenceService();
 
   try {
     final existingTables = database.schema.listTables().toSet();
-    final colliding = resolvedTables
+    final colliding = orderedTables
         .map((table) => table.targetName)
         .where(existingTables.contains)
         .toList(growable: false);
@@ -283,8 +312,8 @@ Future<GenericImportSummary> _runGenericImport({
     database.begin();
     transactionOpen = true;
 
-    for (var index = 0; index < resolvedTables.length; index++) {
-      final table = resolvedTables[index];
+    for (var index = 0; index < orderedTables.length; index++) {
+      final table = orderedTables[index];
       _throwIfCancelled(isCancelled);
       database.execute(_buildCreateTableSql(table));
       sendUpdate(
@@ -295,7 +324,7 @@ Future<GenericImportSummary> _runGenericImport({
             jobId: request.jobId,
             currentTable: table.targetName,
             completedTables: index,
-            totalTables: resolvedTables.length,
+            totalTables: orderedTables.length,
             currentTableRowsCopied: 0,
             currentTableRowCount: table.rows.length,
             totalRowsCopied: rowsCopiedByTable.values.fold<int>(
@@ -309,14 +338,14 @@ Future<GenericImportSummary> _runGenericImport({
       await Future<void>.delayed(Duration.zero);
     }
 
-    for (var index = 0; index < resolvedTables.length; index++) {
-      final table = resolvedTables[index];
+    for (var index = 0; index < orderedTables.length; index++) {
+      final table = orderedTables[index];
       final copied = await _copyTableData(
         database: database,
         table: table,
         request: request,
         completedTables: index,
-        totalTables: resolvedTables.length,
+        totalTables: orderedTables.length,
         priorRowsCopied: rowsCopiedByTable.values.fold<int>(
           0,
           (sum, value) => sum + value,
@@ -336,6 +365,14 @@ Future<GenericImportSummary> _runGenericImport({
       );
     }
 
+    for (final table in orderedTables) {
+      if (table.foreignKey == null) {
+        continue;
+      }
+      _throwIfCancelled(isCancelled);
+      database.execute(_buildCreateIndexSql(table));
+    }
+
     database.commit();
     transactionOpen = false;
     return GenericImportSummary(
@@ -343,13 +380,13 @@ Future<GenericImportSummary> _runGenericImport({
       sourcePath: request.sourcePath,
       targetPath: request.targetPath,
       formatLabel: materialized.format.label,
-      importedTables: resolvedTables
+      importedTables: orderedTables
           .map((table) => table.targetName)
           .toList(growable: false),
       rowsCopiedByTable: rowsCopiedByTable,
       warnings: warnings,
       statusMessage:
-          'Imported ${rowsCopiedByTable.values.fold<int>(0, (sum, value) => sum + value)} rows from ${resolvedTables.length} table${resolvedTables.length == 1 ? '' : 's'}.',
+          'Imported ${rowsCopiedByTable.values.fold<int>(0, (sum, value) => sum + value)} rows from ${orderedTables.length} table${orderedTables.length == 1 ? '' : 's'}.',
       rolledBack: false,
     );
   } on _GenericImportCancelledSignal {
@@ -455,9 +492,122 @@ Future<int> _copyTableData({
 String _buildCreateTableSql(_ResolvedImportTable table) {
   final columnSql = <String>[
     for (final column in table.columns)
-      '${_quoteIdentifier(column.targetName)} ${column.targetType}',
+      _buildCreateColumnSql(
+        column,
+        primaryKeyTargetColumn: table.primaryKeyTargetColumn,
+        foreignKey: table.foreignKey,
+      ),
   ];
   return 'CREATE TABLE ${_quoteIdentifier(table.targetName)} (${columnSql.join(", ")})';
+}
+
+String _buildCreateColumnSql(
+  ImportColumnDraft column, {
+  required String? primaryKeyTargetColumn,
+  required _ResolvedForeignKey? foreignKey,
+}) {
+  final buffer = StringBuffer(
+    '${_quoteIdentifier(column.targetName)} ${column.targetType}',
+  );
+  if (column.targetName == primaryKeyTargetColumn) {
+    buffer.write(' PRIMARY KEY');
+  }
+  if (foreignKey != null && column.targetName == foreignKey.childTargetColumn) {
+    buffer
+      ..write(' REFERENCES ${_quoteIdentifier(foreignKey.parentTargetTable)}')
+      ..write('(${_quoteIdentifier(foreignKey.parentTargetColumn)})');
+  }
+  return buffer.toString();
+}
+
+String _buildCreateIndexSql(_ResolvedImportTable table) {
+  final foreignKey = table.foreignKey!;
+  final indexName = 'idx_${table.targetName}_${foreignKey.childTargetColumn}';
+  return 'CREATE INDEX ${_quoteIdentifier(indexName)} '
+      'ON ${_quoteIdentifier(table.targetName)} '
+      '(${_quoteIdentifier(foreignKey.childTargetColumn)})';
+}
+
+String? _resolveTargetColumnName(
+  List<ImportColumnDraft> columns,
+  String? sourceColumnName,
+) {
+  if (sourceColumnName == null) {
+    return null;
+  }
+  for (final column in columns) {
+    if (column.sourceName == sourceColumnName) {
+      return column.targetName;
+    }
+  }
+  throw StateError(
+    'Required import column `$sourceColumnName` is no longer available.',
+  );
+}
+
+_ResolvedImportTable _finalizeResolvedImportTable(
+  _ResolvedImportTable table, {
+  required Map<String, _ResolvedImportTable> resolvedBySourceId,
+  required List<String> warnings,
+}) {
+  final pending = table.pendingParentRelation;
+  if (pending == null) {
+    return table;
+  }
+  final parent = resolvedBySourceId[pending.parentSourceId];
+  if (parent == null) {
+    warnings.add(
+      'Skipping foreign key for ${table.targetName}.${pending.childTargetColumn} because the parent table `${pending.parentSourceId}` is not selected.',
+    );
+    return table;
+  }
+  final parentTargetColumn = _resolveTargetColumnName(
+    parent.columns,
+    pending.parentSourceColumn,
+  );
+  return table.copyWith(
+    foreignKey: _ResolvedForeignKey(
+      childTargetColumn: pending.childTargetColumn,
+      parentTargetTable: parent.targetName,
+      parentTargetColumn: parentTargetColumn!,
+      parentSourceId: pending.parentSourceId,
+    ),
+  );
+}
+
+List<_ResolvedImportTable> _orderResolvedImportTables(
+  List<_ResolvedImportTable> tables,
+) {
+  final bySourceId = <String, _ResolvedImportTable>{
+    for (final table in tables) table.sourceId: table,
+  };
+  final ordered = <_ResolvedImportTable>[];
+  final permanent = <String>{};
+  final temporary = <String>{};
+
+  void visit(_ResolvedImportTable table) {
+    if (permanent.contains(table.sourceId)) {
+      return;
+    }
+    if (!temporary.add(table.sourceId)) {
+      return;
+    }
+    final parentSourceId = table.foreignKey?.parentSourceId;
+    if (parentSourceId != null) {
+      final parent = bySourceId[parentSourceId];
+      if (parent != null) {
+        visit(parent);
+      }
+    }
+    temporary.remove(table.sourceId);
+    permanent.add(table.sourceId);
+    ordered.add(table);
+  }
+
+  for (final table in tables) {
+    visit(table);
+  }
+  return ordered;
 }
 
 String _quoteIdentifier(String value) {
@@ -477,6 +627,9 @@ class _ResolvedImportTable {
     required this.targetName,
     required this.rows,
     required this.columns,
+    this.primaryKeyTargetColumn,
+    this.pendingParentRelation,
+    this.foreignKey,
   });
 
   final String sourceId;
@@ -484,6 +637,48 @@ class _ResolvedImportTable {
   final String targetName;
   final List<Map<String, Object?>> rows;
   final List<ImportColumnDraft> columns;
+  final String? primaryKeyTargetColumn;
+  final _PendingResolvedForeignKey? pendingParentRelation;
+  final _ResolvedForeignKey? foreignKey;
+
+  _ResolvedImportTable copyWith({_ResolvedForeignKey? foreignKey}) {
+    return _ResolvedImportTable(
+      sourceId: sourceId,
+      sourceName: sourceName,
+      targetName: targetName,
+      rows: rows,
+      columns: columns,
+      primaryKeyTargetColumn: primaryKeyTargetColumn,
+      pendingParentRelation: pendingParentRelation,
+      foreignKey: foreignKey ?? this.foreignKey,
+    );
+  }
+}
+
+class _PendingResolvedForeignKey {
+  const _PendingResolvedForeignKey({
+    required this.parentSourceId,
+    required this.childTargetColumn,
+    required this.parentSourceColumn,
+  });
+
+  final String parentSourceId;
+  final String childTargetColumn;
+  final String parentSourceColumn;
+}
+
+class _ResolvedForeignKey {
+  const _ResolvedForeignKey({
+    required this.childTargetColumn,
+    required this.parentTargetTable,
+    required this.parentTargetColumn,
+    required this.parentSourceId,
+  });
+
+  final String childTargetColumn;
+  final String parentTargetTable;
+  final String parentTargetColumn;
+  final String parentSourceId;
 }
 
 class _GenericImportCancelled implements Exception {

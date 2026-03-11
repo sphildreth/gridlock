@@ -419,6 +419,16 @@ class GenericImportOptions {
   }
 }
 
+GenericImportOptions defaultGenericImportOptionsFor(ImportFormatKey key) {
+  return switch (key) {
+    ImportFormatKey.tsv => const GenericImportOptions(delimiter: '\t'),
+    ImportFormatKey.json => const GenericImportOptions(
+      structuredStrategy: StructuredImportStrategy.normalize,
+    ),
+    _ => const GenericImportOptions(),
+  };
+}
+
 class GenericImportInspection {
   const GenericImportInspection({
     required this.sourcePath,
@@ -437,6 +447,18 @@ class GenericImportInspection {
   final String? explanation;
 }
 
+class MaterializedImportParentRelation {
+  const MaterializedImportParentRelation({
+    required this.parentSourceId,
+    required this.childSourceColumn,
+    required this.parentSourceColumn,
+  });
+
+  final String parentSourceId;
+  final String childSourceColumn;
+  final String parentSourceColumn;
+}
+
 class MaterializedImportTableData {
   const MaterializedImportTableData({
     required this.sourceId,
@@ -445,6 +467,8 @@ class MaterializedImportTableData {
     required this.rows,
     this.description,
     this.warnings = const <String>[],
+    this.primaryKeySourceColumn,
+    this.parentRelation,
   });
 
   final String sourceId;
@@ -453,6 +477,8 @@ class MaterializedImportTableData {
   final List<Map<String, Object?>> rows;
   final String? description;
   final List<String> warnings;
+  final String? primaryKeySourceColumn;
+  final MaterializedImportParentRelation? parentRelation;
 }
 
 class MaterializedImportSource {

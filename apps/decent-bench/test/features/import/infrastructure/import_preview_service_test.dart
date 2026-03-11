@@ -37,6 +37,32 @@ void main() {
     );
   }
 
+  String resolveJsonFixturePath(String filename) {
+    final candidates = <String>[
+      p.normalize(
+        p.join(
+          Directory.current.path,
+          '..',
+          '..',
+          'test-data',
+          'json',
+          filename,
+        ),
+      ),
+      p.normalize(
+        p.join(Directory.current.path, 'test-data', 'json', filename),
+      ),
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+    throw StateError(
+      'Could not locate test-data/json/$filename from ${Directory.current.path}',
+    );
+  }
+
   setUp(() async {
     service = ImportPreviewService();
     tempDir = await Directory.systemTemp.createTemp(
@@ -110,6 +136,50 @@ void main() {
       isTrue,
     );
   });
+
+  test('JSON defaults to normalized relational imports', () {
+    final options = defaultGenericImportOptionsFor(ImportFormatKey.json);
+
+    expect(options.structuredStrategy, StructuredImportStrategy.normalize);
+  });
+
+  test(
+    'normalizes nested JSON fixtures into parent and child tables',
+    () async {
+      final inspection = await service.inspect(
+        sourcePath: resolveJsonFixturePath('nested_orders.json'),
+        format: registry.forKey(ImportFormatKey.json),
+        options: defaultGenericImportOptionsFor(ImportFormatKey.json),
+      );
+
+      expect(
+        inspection.tables.map((table) => table.targetName),
+        containsAll(<String>[
+          'nested_orders',
+          'nested_orders_orders',
+          'nested_orders_orders_items',
+        ]),
+      );
+
+      final orders = inspection.tables.firstWhere(
+        (table) => table.targetName == 'nested_orders_orders',
+      );
+      final items = inspection.tables.firstWhere(
+        (table) => table.targetName == 'nested_orders_orders_items',
+      );
+
+      expect(orders.rowCount, 2);
+      expect(items.rowCount, 3);
+      expect(
+        orders.columns.map((column) => column.sourceName),
+        containsAll(<String>['_import_id', 'parent_id', 'order_id']),
+      );
+      expect(
+        items.columns.map((column) => column.sourceName),
+        containsAll(<String>['_import_id', 'parent_id', 'sku']),
+      );
+    },
+  );
 
   test('flattens NDJSON into one table', () async {
     final file = File(p.join(tempDir.path, 'events.jsonl'))

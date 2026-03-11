@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:decent_bench/features/import/domain/import_models.dart';
+import 'package:decent_bench/features/import/infrastructure/import_execution_service.dart';
+import 'package:decent_bench/features/import/infrastructure/import_format_registry.dart';
+import 'package:decent_bench/features/import/infrastructure/import_preview_service.dart';
 import 'package:decent_bench/features/workspace/domain/excel_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sql_dump_import_models.dart';
 import 'package:decent_bench/features/workspace/domain/sqlite_import_models.dart';
@@ -69,6 +73,21 @@ void main() {
       }
 
       return rows;
+    }
+
+    Future<GenericImportSummary> runGenericImport(
+      GenericImportRequest request,
+    ) async {
+      final service = ImportExecutionService(
+        resolver: _FixedResolver(nativeLib),
+      );
+      final updates = await service.execute(request: request).toList();
+      final terminal = updates.last;
+
+      expect(terminal.kind, GenericImportUpdateKind.completed);
+      expect(terminal.summary, isNotNull);
+
+      return terminal.summary!;
     }
 
     Future<void> expectBridgeFailure(
@@ -262,6 +281,32 @@ INSERT INTO `metrics` VALUES ('Q1', 1200.50), ('Q2', 1800.25);
       }
       throw StateError(
         'Could not locate test-data/excel-test-pack from ${Directory.current.path}',
+      );
+    }
+
+    String resolveJsonFixturePath(String filename) {
+      final candidates = <String>[
+        p.normalize(
+          p.join(
+            Directory.current.path,
+            '..',
+            '..',
+            'test-data',
+            'json',
+            filename,
+          ),
+        ),
+        p.normalize(
+          p.join(Directory.current.path, 'test-data', 'json', filename),
+        ),
+      ];
+      for (final candidate in candidates) {
+        if (File(candidate).existsSync()) {
+          return candidate;
+        }
+      }
+      throw StateError(
+        'Could not locate test-data/json/$filename from ${Directory.current.path}',
       );
     }
 
@@ -762,6 +807,118 @@ ORDER BY n.id
           ),
           isTrue,
         );
+      },
+    );
+
+    test(
+      'imports nested JSON relations as foreign-keyed tables with FK indexes',
+      skip: skipReason,
+      () async {
+        final previewService = ImportPreviewService();
+        final sourcePath = resolveJsonFixturePath('nested_orders.json');
+        final targetPath = p.join(tempDir.path, 'nested-orders.ddb');
+        final options = defaultGenericImportOptionsFor(ImportFormatKey.json);
+
+        final inspection = await previewService.inspect(
+          sourcePath: sourcePath,
+          format: ImportFormatRegistry.instance.forKey(ImportFormatKey.json),
+          options: options,
+        );
+        final summary = await runGenericImport(
+          GenericImportRequest(
+            jobId: 'nested-json-import',
+            sourcePath: sourcePath,
+            targetPath: targetPath,
+            importIntoExistingTarget: false,
+            replaceExistingTarget: true,
+            formatKey: ImportFormatKey.json,
+            options: options,
+            tables: inspection.tables,
+          ),
+        );
+
+        expect(
+          summary.importedTables,
+          orderedEquals(<String>[
+            'nested_orders',
+            'nested_orders_orders',
+            'nested_orders_orders_items',
+          ]),
+        );
+
+        await bridge.openDatabase(targetPath);
+        final schema = await bridge.loadSchema();
+        final orderRows = await queryAllRows('''
+SELECT o.order_id, i.sku, i.qty
+FROM nested_orders_orders AS o
+JOIN nested_orders_orders_items AS i
+  ON i.parent_id = o.import_id
+ORDER BY o.order_id, i.sku
+''');
+
+        final orders = schema.objectNamed('nested_orders_orders');
+        final items = schema.objectNamed('nested_orders_orders_items');
+        expect(orders, isNotNull);
+        expect(items, isNotNull);
+        expect(
+          orders!.columns
+              .firstWhere((column) => column.name == 'import_id')
+              .primaryKey,
+          isTrue,
+        );
+        expect(
+          orders.columns
+              .firstWhere((column) => column.name == 'parent_id')
+              .refTable,
+          'nested_orders',
+        );
+        expect(
+          orders.columns
+              .firstWhere((column) => column.name == 'parent_id')
+              .refColumn,
+          'import_id',
+        );
+        expect(
+          items!.columns
+              .firstWhere((column) => column.name == 'import_id')
+              .primaryKey,
+          isTrue,
+        );
+        expect(
+          items.columns
+              .firstWhere((column) => column.name == 'parent_id')
+              .refTable,
+          'nested_orders_orders',
+        );
+        expect(
+          items.columns
+              .firstWhere((column) => column.name == 'parent_id')
+              .refColumn,
+          'import_id',
+        );
+        expect(
+          schema.indexes.any(
+            (index) =>
+                index.table == 'nested_orders_orders' &&
+                index.columns.length == 1 &&
+                index.columns.single == 'parent_id',
+          ),
+          isTrue,
+        );
+        expect(
+          schema.indexes.any(
+            (index) =>
+                index.table == 'nested_orders_orders_items' &&
+                index.columns.length == 1 &&
+                index.columns.single == 'parent_id',
+          ),
+          isTrue,
+        );
+        expect(orderRows, hasLength(3));
+        expect(orderRows.first['order_id'], 5001);
+        expect(orderRows.first['sku'], 'DOC-9000');
+        expect(orderRows.last['order_id'], 5002);
+        expect(orderRows.last['sku'], 'KEY-7777');
       },
     );
 

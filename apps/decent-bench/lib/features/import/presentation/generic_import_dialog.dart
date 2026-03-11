@@ -150,7 +150,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   @override
   void initState() {
     super.initState();
-    _options = _defaultOptionsFor(widget.initialFormat.key);
+    _options = defaultGenericImportOptionsFor(widget.initialFormat.key);
     _syncSuggestedTargetPath(widget.initialSourcePath);
     unawaited(_inspectSource());
   }
@@ -1303,13 +1303,6 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
       GenericImportWizardStep.summary => 'Summary',
     };
   }
-}
-
-GenericImportOptions _defaultOptionsFor(ImportFormatKey key) {
-  return switch (key) {
-    ImportFormatKey.tsv => const GenericImportOptions(delimiter: '\t'),
-    _ => const GenericImportOptions(),
-  };
 }
 
 class _Banner extends StatelessWidget {
