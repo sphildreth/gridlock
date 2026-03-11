@@ -848,6 +848,83 @@ ORDER BY n.id
     );
 
     test(
+      'imports aggregate-only Excel summary sheets as views',
+      skip: skipReason,
+      () async {
+        final fixturePackPath = resolveExcelFixturePackPath();
+        final sourcePath = p.join(
+          fixturePackPath,
+          'cross_sheet_calculations.xlsx',
+        );
+        final targetPath = p.join(tempDir.path, 'cross-sheet-view.ddb');
+
+        final inspection = await bridge.inspectExcelSource(
+          sourcePath: sourcePath,
+          headerRow: true,
+        );
+        final request = ExcelImportRequest(
+          jobId: 'fixture-cross-sheet-view',
+          sourcePath: sourcePath,
+          targetPath: targetPath,
+          importIntoExistingTarget: false,
+          replaceExistingTarget: true,
+          headerRow: true,
+          sheets: inspection.sheets,
+        );
+
+        final updates = await bridge.importExcel(request: request).toList();
+        final terminal = updates.last;
+
+        expect(terminal.kind, ExcelImportUpdateKind.completed);
+        expect(
+          terminal.summary?.importedViews,
+          contains('Dashboard'),
+          reason: (terminal.summary?.warnings ?? const <String>[]).join('\n'),
+        );
+
+        await bridge.openDatabase(targetPath);
+        final schema = await bridge.loadSchema();
+        expect(
+          schema.views.any((item) => item.name.toLowerCase() == 'dashboard'),
+          isTrue,
+        );
+
+        final dashboardRows = await queryAllRows(
+          'SELECT "Region", "OrderCount", "Revenue" '
+          'FROM "Dashboard" ORDER BY "Region"',
+        );
+        final byRegion = <String, Map<String, Object?>>{
+          for (final row in dashboardRows) row['Region']! as String: row,
+        };
+
+        expect(
+          byRegion.keys,
+          orderedEquals(<String>['East', 'North', 'South', 'West']),
+        );
+        expect(byRegion['North']?['OrderCount'], 28);
+        expect(
+          (byRegion['North']?['Revenue'] as num).toDouble(),
+          closeTo(35378.06, 0.01),
+        );
+        expect(byRegion['South']?['OrderCount'], 24);
+        expect(
+          (byRegion['South']?['Revenue'] as num).toDouble(),
+          closeTo(32640.03, 0.01),
+        );
+        expect(byRegion['East']?['OrderCount'], 15);
+        expect(
+          (byRegion['East']?['Revenue'] as num).toDouble(),
+          closeTo(17176.03, 0.01),
+        );
+        expect(byRegion['West']?['OrderCount'], 13);
+        expect(
+          (byRegion['West']?['Revenue'] as num).toDouble(),
+          closeTo(18386.97, 0.01),
+        );
+      },
+    );
+
+    test(
       'imports every workbook from the checked-in Excel fixture pack',
       skip: skipReason,
       () async {
@@ -909,8 +986,13 @@ ORDER BY n.id
           final schema = await bridge.loadSchema();
           final importedTables =
               terminal.summary?.importedTables ?? const <String>[];
+          final importedViews =
+              terminal.summary?.importedViews ?? const <String>[];
           final schemaTableNames = schema.tables
               .map((table) => table.name.toLowerCase())
+              .toList(growable: false);
+          final schemaViewNames = schema.views
+              .map((view) => view.name.toLowerCase())
               .toList(growable: false);
 
           expect(
@@ -926,6 +1008,14 @@ ORDER BY n.id
             ),
             reason:
                 'Schema missing imported tables for ${p.basename(workbookFile.path)}',
+          );
+          expect(
+            schemaViewNames,
+            containsAll(
+              importedViews.map((viewName) => viewName.toLowerCase()),
+            ),
+            reason:
+                'Schema missing imported views for ${p.basename(workbookFile.path)}',
           );
 
           if (p.extension(workbookFile.path).toLowerCase() == '.xls') {

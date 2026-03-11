@@ -412,6 +412,7 @@ class _ExcelImportDialogState extends State<ExcelImportDialog> {
               ('Source', p.basename(summary.sourcePath)),
               ('Target', p.basename(summary.targetPath)),
               ('Imported tables', '${summary.importedTables.length}'),
+              ('Imported views', '${summary.importedViews.length}'),
               ('Rows copied', '${summary.totalRowsCopied}'),
               ('Rolled back', summary.rolledBack ? 'Yes' : 'No'),
             ],
@@ -434,6 +435,22 @@ class _ExcelImportDialogState extends State<ExcelImportDialog> {
                     child: Text(
                       '$table | ${summary.rowsCopiedByTable[table] ?? 0} rows',
                     ),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 16),
+          Text('Imported views', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          if (summary.importedViews.isEmpty)
+            const Text('No views were imported.')
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                for (final view in summary.importedViews)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(view),
                   ),
               ],
             ),

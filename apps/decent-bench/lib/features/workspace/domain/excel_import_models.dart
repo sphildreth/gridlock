@@ -302,6 +302,7 @@ class ExcelImportSummary {
     required this.sourcePath,
     required this.targetPath,
     required this.importedTables,
+    this.importedViews = const <String>[],
     required this.rowsCopiedByTable,
     required this.warnings,
     required this.statusMessage,
@@ -312,6 +313,7 @@ class ExcelImportSummary {
   final String sourcePath;
   final String targetPath;
   final List<String> importedTables;
+  final List<String> importedViews;
   final Map<String, int> rowsCopiedByTable;
   final List<String> warnings;
   final String statusMessage;
@@ -319,6 +321,16 @@ class ExcelImportSummary {
 
   String? get firstImportedTable =>
       importedTables.isEmpty ? null : importedTables.first;
+
+  String? get firstImportedObject {
+    if (importedTables.isNotEmpty) {
+      return importedTables.first;
+    }
+    if (importedViews.isNotEmpty) {
+      return importedViews.first;
+    }
+    return null;
+  }
 
   int get totalRowsCopied =>
       rowsCopiedByTable.values.fold<int>(0, (sum, value) => sum + value);
@@ -329,6 +341,7 @@ class ExcelImportSummary {
       'sourcePath': sourcePath,
       'targetPath': targetPath,
       'importedTables': importedTables,
+      'importedViews': importedViews,
       'rowsCopiedByTable': rowsCopiedByTable,
       'warnings': warnings,
       'statusMessage': statusMessage,
@@ -342,6 +355,8 @@ class ExcelImportSummary {
       sourcePath: map['sourcePath']! as String,
       targetPath: map['targetPath']! as String,
       importedTables: ((map['importedTables'] as List?) ?? const <Object?>[])
+          .cast<String>(),
+      importedViews: ((map['importedViews'] as List?) ?? const <Object?>[])
           .cast<String>(),
       rowsCopiedByTable:
           ((map['rowsCopiedByTable'] as Map?) ?? const <Object?, Object?>{})

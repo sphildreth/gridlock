@@ -520,8 +520,12 @@ Edge cases:
   or fail with a clear dependency message
 - `.xlsx` workbooks that the direct parser rejects may be retried through the
   same temporary normalization path
-- formula cells are imported as formula text with warnings; formula evaluation
-  and computed-column transforms remain deferred
+- formula columns on normal row-oriented sheets are imported as formula text
+  with warnings; formula evaluation and computed-column transforms remain
+  deferred
+- aggregate-only summary sheets may be imported as read-only views when their
+  formulas can be translated against selected workbook dependencies; otherwise
+  they fall back to table import with warnings
 
 ### 7.3 SQLite import
 

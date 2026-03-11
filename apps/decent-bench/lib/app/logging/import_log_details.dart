@@ -18,7 +18,9 @@ Map<String, Object?> buildImportInspectionLogDetails({
   };
 }
 
-Map<String, Object?> buildExcelImportRequestLogDetails(ExcelImportRequest request) {
+Map<String, Object?> buildExcelImportRequestLogDetails(
+  ExcelImportRequest request,
+) {
   return <String, Object?>{
     'job_id': request.jobId,
     'source_path': request.sourcePath,
@@ -37,12 +39,15 @@ Map<String, Object?> buildExcelImportRequestLogDetails(ExcelImportRequest reques
   };
 }
 
-Map<String, Object?> buildExcelImportSummaryLogDetails(ExcelImportSummary summary) {
+Map<String, Object?> buildExcelImportSummaryLogDetails(
+  ExcelImportSummary summary,
+) {
   return _buildSummaryDetails(
     jobId: summary.jobId,
     sourcePath: summary.sourcePath,
     targetPath: summary.targetPath,
     importedTables: summary.importedTables,
+    importedViews: summary.importedViews,
     rowsCopiedByTable: summary.rowsCopiedByTable,
     warnings: summary.warnings,
     rolledBack: summary.rolledBack,
@@ -134,7 +139,8 @@ Map<String, Object?> buildSqliteImportSummaryLogDetails(
     extra: <String, Object?>{
       'status_message': summary.statusMessage,
       'index_count': summary.indexesCreated.length,
-      if (summary.indexesCreated.isNotEmpty) 'indexes_created': summary.indexesCreated,
+      if (summary.indexesCreated.isNotEmpty)
+        'indexes_created': summary.indexesCreated,
       'skipped_item_count': summary.skippedItems.length,
       if (summary.skippedItems.isNotEmpty)
         'skipped_items': summary.skippedItems
@@ -197,6 +203,7 @@ Map<String, Object?> _buildSummaryDetails({
   required String sourcePath,
   required String targetPath,
   required List<String> importedTables,
+  List<String> importedViews = const <String>[],
   required Map<String, int> rowsCopiedByTable,
   required List<String> warnings,
   required bool rolledBack,
@@ -208,6 +215,8 @@ Map<String, Object?> _buildSummaryDetails({
     'target_path': targetPath,
     'imported_table_count': importedTables.length,
     'imported_tables': importedTables,
+    'imported_view_count': importedViews.length,
+    'imported_views': importedViews,
     'total_rows_copied': rowsCopiedByTable.values.fold<int>(
       0,
       (sum, value) => sum + value,

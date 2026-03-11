@@ -1869,10 +1869,10 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
     await openDatabase(summary.targetPath, createIfMissing: false);
-    if (summary.firstImportedTable != null) {
+    if (summary.firstImportedObject != null) {
       createTab(
         sql:
-            'SELECT *\nFROM ${_quoteIdentifier(summary.firstImportedTable!)}\nLIMIT ${config.defaultPageSize};',
+            'SELECT *\nFROM ${_quoteIdentifier(summary.firstImportedObject!)}\nLIMIT ${config.defaultPageSize};',
       );
     }
     excelImportSession = null;
