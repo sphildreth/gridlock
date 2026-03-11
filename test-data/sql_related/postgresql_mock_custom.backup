@@ -1,0 +1,3 @@
+MOCK FILE FOR DETECTION/UI TESTING ONLY
+This is NOT a real pg_dump custom-format backup.
+Use it to test extension-based detection, unsupported-format messaging, and wizard routing.

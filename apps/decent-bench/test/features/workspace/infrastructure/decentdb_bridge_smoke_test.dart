@@ -248,8 +248,12 @@ INSERT INTO `metrics` VALUES ('Q1', 1200.50), ('Q2', 1800.25);
           ),
         ),
         p.normalize(
+          p.join(Directory.current.path, '..', '..', 'test-data', 'excel'),
+        ),
+        p.normalize(
           p.join(Directory.current.path, 'test-data', 'excel-test-pack'),
         ),
+        p.normalize(p.join(Directory.current.path, 'test-data', 'excel')),
       ];
       for (final candidate in candidates) {
         if (Directory(candidate).existsSync()) {

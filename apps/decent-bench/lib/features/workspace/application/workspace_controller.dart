@@ -11,6 +11,7 @@ import '../domain/app_config.dart';
 import '../domain/excel_import_models.dart';
 import '../domain/sql_dump_import_models.dart';
 import '../domain/sqlite_import_models.dart';
+import '../domain/workspace_file_entry.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_shell_preferences.dart';
 import '../domain/workspace_state.dart';
@@ -3654,9 +3655,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   String _suggestImportTargetPath(String sourcePath) {
-    final directory = p.dirname(sourcePath);
-    final basename = p.basenameWithoutExtension(sourcePath);
-    return p.join(directory, '$basename.ddb');
+    return suggestNewDecentDbTargetPath(sourcePath);
   }
 
   String _quoteIdentifier(String value) {

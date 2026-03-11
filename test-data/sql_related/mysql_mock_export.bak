@@ -1,0 +1,3 @@
+MOCK FILE FOR DETECTION/UI TESTING ONLY
+This is NOT a real MySQL backup format.
+Use it to test .bak handling, unsupported messages, and import workflow branching.

@@ -761,7 +761,10 @@ void main() {
       expect(completionEntry.rowCount, excelSummary.totalRowsCopied);
       expect(completionEntry.elapsedNanos, greaterThan(0));
       expect(completionEntry.databasePath, endsWith('.ddb'));
-      expect(completionDetails['total_rows_copied'], excelSummary.totalRowsCopied);
+      expect(
+        completionDetails['total_rows_copied'],
+        excelSummary.totalRowsCopied,
+      );
       expect(
         completionDetails['rows_copied_by_table'],
         excelSummary.rowsCopiedByTable,
@@ -802,6 +805,36 @@ void main() {
     expect(controller.excelImportSession?.phase, ExcelImportJobPhase.cancelled);
     expect(controller.excelImportSession?.summary?.rolledBack, isTrue);
   });
+
+  test(
+    'import workflows suggest new DecentDB targets beside the source file',
+    () async {
+      final controller = WorkspaceController(
+        gateway: FakeWorkspaceGateway(),
+        configStore: InMemoryConfigStore(),
+        workspaceStateStore: InMemoryWorkspaceStateStore(),
+      );
+      await controller.initialize();
+
+      controller.beginExcelImport(sourcePath: '/tmp/imports/source.xlsx');
+      expect(
+        controller.excelImportSession?.targetPath,
+        '/tmp/imports/source.ddb',
+      );
+
+      controller.beginSqlDumpImport(sourcePath: '/tmp/imports/source.sql');
+      expect(
+        controller.sqlDumpImportSession?.targetPath,
+        '/tmp/imports/source.ddb',
+      );
+
+      controller.beginSqliteImport(sourcePath: '/tmp/imports/source.sqlite');
+      expect(
+        controller.sqliteImportSession?.targetPath,
+        '/tmp/imports/source.ddb',
+      );
+    },
+  );
 
   test(
     'sql dump import inspection loads parsed tables, warnings, and import summary',
@@ -983,8 +1016,14 @@ void main() {
         completionDetails['total_rows_copied'],
         sqliteSummary.totalRowsCopied,
       );
-      expect(completionDetails['index_count'], sqliteSummary.indexesCreated.length);
-      expect(completionDetails['skipped_item_count'], sqliteSummary.skippedItems.length);
+      expect(
+        completionDetails['index_count'],
+        sqliteSummary.indexesCreated.length,
+      );
+      expect(
+        completionDetails['skipped_item_count'],
+        sqliteSummary.skippedItems.length,
+      );
       expect(
         completionDetails['rows_copied_by_table'],
         sqliteSummary.rowsCopiedByTable,

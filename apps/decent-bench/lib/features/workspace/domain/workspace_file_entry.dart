@@ -51,3 +51,11 @@ WorkspaceIncomingFileKind detectWorkspaceIncomingFileKind(String rawPath) {
     _ => WorkspaceIncomingFileKind.unknown,
   };
 }
+
+String suggestNewDecentDbTargetPath(String rawSourcePath) {
+  final normalized = rawSourcePath.trim();
+  if (normalized.isEmpty) {
+    return 'workspace$canonicalDecentDbExtension';
+  }
+  return p.setExtension(normalized, canonicalDecentDbExtension);
+}

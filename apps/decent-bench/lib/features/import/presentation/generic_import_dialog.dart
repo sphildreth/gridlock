@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../app/logging/app_logger.dart';
 import '../../../app/logging/import_log_details.dart';
+import '../../workspace/domain/workspace_file_entry.dart';
 import '../../workspace/domain/import_target_types.dart';
 import '../../workspace/domain/workspace_models.dart';
 import '../domain/import_models.dart';
@@ -76,6 +78,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   bool _importIntoExistingTarget = false;
   bool _replaceExistingTarget = true;
   String? _focusedTableId;
+  String? _lastSuggestedTargetPath;
 
   int _durationToNanos(Duration duration) => duration.inMicroseconds * 1000;
 
@@ -148,6 +151,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   void initState() {
     super.initState();
     _options = _defaultOptionsFor(widget.initialFormat.key);
+    _syncSuggestedTargetPath(widget.initialSourcePath);
     unawaited(_inspectSource());
   }
 
@@ -985,9 +989,11 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
       }
       return;
     }
+    final suggestedTargetPath = _resolvedNewTargetPath();
     final location = await getSaveLocation(
       acceptedTypeGroups: const <XTypeGroup>[_decentDbTargetTypeGroup],
-      suggestedName: 'workspace.ddb',
+      initialDirectory: p.dirname(suggestedTargetPath),
+      suggestedName: p.basename(suggestedTargetPath),
     );
     if (location != null) {
       _targetPathController.text = location.path;
@@ -1021,7 +1027,8 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
         extra: <String, Object?>{
           'format_key': widget.initialFormat.key.name,
           'format_label': widget.initialFormat.label,
-          if (inspection.explanation != null) 'explanation': inspection.explanation,
+          if (inspection.explanation != null)
+            'explanation': inspection.explanation,
         },
       );
       _logInfo(
@@ -1042,6 +1049,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
         return;
       }
       setState(() {
+        _syncSuggestedTargetPath(inspection.sourcePath);
         _inspection = inspection;
         _warnings = inspection.warnings;
         _phase = GenericImportJobPhase.ready;
@@ -1069,6 +1077,23 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
         _error = '$error';
       });
     }
+  }
+
+  String _resolvedNewTargetPath() {
+    final currentTarget = _targetPathController.text.trim();
+    if (currentTarget.isNotEmpty) {
+      return currentTarget;
+    }
+    return suggestNewDecentDbTargetPath(_sourcePathController.text.trim());
+  }
+
+  void _syncSuggestedTargetPath(String sourcePath) {
+    final suggestedTargetPath = suggestNewDecentDbTargetPath(sourcePath);
+    final currentTarget = _targetPathController.text.trim();
+    if (currentTarget.isEmpty || currentTarget == _lastSuggestedTargetPath) {
+      _targetPathController.text = suggestedTargetPath;
+    }
+    _lastSuggestedTargetPath = suggestedTargetPath;
   }
 
   Future<void> _runImport() async {

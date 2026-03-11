@@ -51,4 +51,16 @@ void main() {
     expect(decision.kind, WorkspaceIncomingFileKind.sqlite);
     expect(decision.hadMultipleFiles, isTrue);
   });
+
+  test('suggests a new DecentDB target beside the imported source', () {
+    expect(
+      suggestNewDecentDbTargetPath('/tmp/imports/report_tables.html'),
+      '/tmp/imports/report_tables.ddb',
+    );
+    expect(
+      suggestNewDecentDbTargetPath('/tmp/imports/archive.tar.gz'),
+      '/tmp/imports/archive.tar.ddb',
+    );
+    expect(suggestNewDecentDbTargetPath(''), 'workspace.ddb');
+  });
 }

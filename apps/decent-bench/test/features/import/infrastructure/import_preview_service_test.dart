@@ -11,9 +11,37 @@ void main() {
   late Directory tempDir;
   final registry = ImportFormatRegistry.instance;
 
+  String resolveHtmlFixturePath(String filename) {
+    final candidates = <String>[
+      p.normalize(
+        p.join(
+          Directory.current.path,
+          '..',
+          '..',
+          'test-data',
+          'html',
+          filename,
+        ),
+      ),
+      p.normalize(
+        p.join(Directory.current.path, 'test-data', 'html', filename),
+      ),
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+    throw StateError(
+      'Could not locate test-data/html/$filename from ${Directory.current.path}',
+    );
+  }
+
   setUp(() async {
     service = ImportPreviewService();
-    tempDir = await Directory.systemTemp.createTemp('decent-bench-preview-test-');
+    tempDir = await Directory.systemTemp.createTemp(
+      'decent-bench-preview-test-',
+    );
   });
 
   tearDown(() async {
@@ -75,7 +103,10 @@ void main() {
 
     expect(inspection.tables.length, greaterThan(1));
     expect(
-      inspection.tables.any((table) => table.columns.any((column) => column.sourceName == 'parent_id')),
+      inspection.tables.any(
+        (table) =>
+            table.columns.any((column) => column.sourceName == 'parent_id'),
+      ),
       isTrue,
     );
   });
@@ -134,5 +165,20 @@ void main() {
 
     expect(inspection.tables, hasLength(2));
     expect(inspection.tables.first.targetName, contains('Customers'));
+    expect(inspection.tables.every((table) => table.selected), isTrue);
   });
+
+  test(
+    'keeps every detected table selected for checked-in HTML fixtures',
+    () async {
+      final inspection = await service.inspect(
+        sourcePath: resolveHtmlFixturePath('report_tables.html'),
+        format: registry.forKey(ImportFormatKey.htmlTable),
+        options: const GenericImportOptions(),
+      );
+
+      expect(inspection.tables, hasLength(2));
+      expect(inspection.tables.every((table) => table.selected), isTrue);
+    },
+  );
 }

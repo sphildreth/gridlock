@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../application/workspace_controller.dart';
 import '../domain/import_target_types.dart';
 import '../domain/sqlite_import_models.dart';
+import '../domain/workspace_file_entry.dart';
 
 class SqliteImportDialog extends StatefulWidget {
   const SqliteImportDialog({super.key, required this.controller});
@@ -727,12 +728,12 @@ class _SqliteImportDialogState extends State<SqliteImportDialog> {
       return;
     }
 
+    final suggestedTargetPath = session.targetPath.trim().isEmpty
+        ? suggestNewDecentDbTargetPath(session.sourcePath)
+        : session.targetPath.trim();
     final result = await getSaveLocation(
-      suggestedName: p.basename(
-        session.targetPath.trim().isEmpty
-            ? '${p.basenameWithoutExtension(session.sourcePath)}.ddb'
-            : session.targetPath,
-      ),
+      initialDirectory: p.dirname(suggestedTargetPath),
+      suggestedName: p.basename(suggestedTargetPath),
     );
     if (result == null) {
       return;

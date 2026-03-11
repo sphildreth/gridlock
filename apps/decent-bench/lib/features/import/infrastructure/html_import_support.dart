@@ -134,7 +134,7 @@ GenericImportInspection inspectHtmlTableSourceSync({
           sourceId: table.sourceId,
           sourceName: table.sourceName,
           targetName: table.suggestedTargetName,
-          selected: table.sourceId == 'table_1',
+          selected: true,
           rowCount: table.rows.length,
           columns: adjustedColumns,
           previewRows: table.rows
