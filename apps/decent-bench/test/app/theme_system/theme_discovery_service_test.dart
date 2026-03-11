@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:decent_bench/app/theme_system/built_in_theme_assets.dart';
 import 'package:decent_bench/app/theme_system/theme_discovery_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,7 +27,7 @@ void main() {
 
       expect(result.availableThemesById.containsKey('classic-dark'), isTrue);
       expect(result.availableThemesById.containsKey('classic-light'), isTrue);
-      expect(result.availableThemes.length, 2);
+      expect(result.availableThemes.length, kBuiltInThemeAssets.length);
       expect(
         result.availableThemesById['classic-dark']!.metadata.description,
         'A dense, classic dark desktop theme inspired by traditional database tools.',
@@ -39,21 +40,13 @@ void main() {
   );
 
   test('built-in theme assets stay in sync with repo theme files', () async {
-    final assetDark = await rootBundle.loadString(
-      'assets/themes/classic-dark.toml',
-    );
-    final assetLight = await rootBundle.loadString(
-      'assets/themes/classic-light.toml',
-    );
+    for (final asset in kBuiltInThemeAssets) {
+      final assetSource = await rootBundle.loadString(asset.assetPath);
+      final repoSource = await File(
+        '../../themes/${asset.id}.toml',
+      ).readAsString();
 
-    final repoDark = await File(
-      '../../themes/classic-dark.toml',
-    ).readAsString();
-    final repoLight = await File(
-      '../../themes/classic-light.toml',
-    ).readAsString();
-
-    expect(assetDark, repoDark);
-    expect(assetLight, repoLight);
+      expect(assetSource, repoSource, reason: asset.id);
+    }
   });
 }

@@ -1,0 +1,151 @@
+name = "Harbor Night"
+id = "harbor-night"
+version = "1.0.0"
+author = "Decent Bench"
+description = "A maritime blue-gray theme that keeps the grid serious while the editor stays crisp."
+
+[compatibility]
+min_decent_bench_version = "0.1.0"
+max_decent_bench_version = "0.9.x"
+
+[base]
+brightness = "dark"
+
+[colors]
+window_bg = "#16202A"
+panel_bg = "#1D2A36"
+panel_alt_bg = "#233342"
+surface_bg = "#1A2631"
+overlay_bg = "#2E4254"
+border = "#3E556B"
+border_strong = "#58728A"
+text = "#E4EDF5"
+text_muted = "#A9BAC9"
+text_disabled = "#708191"
+accent = "#4FA3D9"
+accent_hover = "#6AB8E8"
+accent_active = "#2F86BD"
+selection = "#294B63"
+focus_ring = "#8FD7FF"
+error = "#E06B6B"
+warning = "#D7A75A"
+success = "#68B085"
+info = "#69C6F0"
+
+[menu]
+bg = "#233342"
+text = "#E4EDF5"
+text_muted = "#A9BAC9"
+item_hover_bg = "#2B475D"
+item_active_bg = "#264A64"
+separator = "#3E556B"
+icon = "#D2E4F2"
+shortcut = "#A9BAC9"
+
+[toolbar]
+bg = "#1C2834"
+button_bg = "#1C2834"
+button_hover_bg = "#253E52"
+button_active_bg = "#213F55"
+button_text = "#E4EDF5"
+button_icon = "#D8E7F3"
+
+[status_bar]
+bg = "#19242F"
+text = "#E4EDF5"
+border_top = "#58728A"
+success = "#68B085"
+warning = "#D7A75A"
+error = "#E06B6B"
+
+[sidebar]
+bg = "#1D2A36"
+header_bg = "#273848"
+header_text = "#FFFFFF"
+item_text = "#E4EDF5"
+item_hover_bg = "#243B4D"
+item_selected_bg = "#2C526C"
+item_selected_text = "#FFFFFF"
+tree_line = "#58728A"
+
+[properties]
+bg = "#1D2A36"
+label = "#A9BAC9"
+value = "#E4EDF5"
+section_header_bg = "#273848"
+section_header_text = "#FFFFFF"
+
+[editor]
+bg = "#16202A"
+text = "#E4EDF5"
+gutter_bg = "#1D2A36"
+gutter_text = "#708191"
+current_line_bg = "#1B2A38"
+selection_bg = "#294B63"
+cursor = "#FFFFFF"
+whitespace = "#506478"
+indent_guide = "#314456"
+tab_active_bg = "#16202A"
+tab_inactive_bg = "#233342"
+tab_hover_bg = "#284054"
+tab_active_text = "#FFFFFF"
+tab_inactive_text = "#A9BAC9"
+
+[results_grid]
+bg = "#18242E"
+header_bg = "#263646"
+header_text = "#FFFFFF"
+row_bg = "#18242E"
+row_alt_bg = "#1F2B34"
+row_hover_bg = "#1F3343"
+row_selected_bg = "#294B63"
+row_selected_text = "#FFFFFF"
+grid_line = "#58728A"
+cell_text = "#E4EDF5"
+null_text = "#708191"
+
+[dialog]
+bg = "#1D2A36"
+title_text = "#E4EDF5"
+body_text = "#DBE5EE"
+input_bg = "#19242F"
+input_text = "#FFFFFF"
+input_border = "#3E556B"
+input_focus_border = "#82CCF7"
+
+[buttons]
+primary_bg = "#4FA3D9"
+primary_text = "#000000"
+primary_hover_bg = "#6AB8E8"
+secondary_bg = "#1C2834"
+secondary_text = "#FFFFFF"
+secondary_hover_bg = "#223748"
+danger_bg = "#E06B6B"
+danger_text = "#000000"
+
+[sql_syntax]
+keyword = "#8FB4FF"
+identifier = "#E5E9F0"
+string = "#A3BE8C"
+number = "#EBCB8B"
+comment = "#7B8BA1"
+operator = "#E5E9F0"
+function = "#88C0D0"
+type = "#B48EAD"
+parameter = "#8FBCBB"
+constant = "#D08770"
+error = "#FF6B81"
+
+[fonts]
+ui_family = "Inter"
+editor_family = "JetBrains Mono"
+ui_size = 13
+editor_size = 13
+line_height = 1.4
+
+[metrics]
+border_radius = 7
+pane_padding = 7
+control_height = 30
+splitter_thickness = 6
+icon_size = 16

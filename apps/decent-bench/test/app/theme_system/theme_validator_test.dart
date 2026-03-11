@@ -1,3 +1,4 @@
+import 'package:decent_bench/app/theme_system/built_in_theme_assets.dart';
 import 'package:decent_bench/app/theme_system/theme_parser.dart';
 import 'package:decent_bench/app/theme_system/theme_presets.dart';
 import 'package:decent_bench/app/theme_system/theme_validator.dart';
@@ -26,6 +27,27 @@ void main() {
     expect(result.theme!.id, 'classic-dark');
     expect(result.theme!.editor.background, const Color(0xFF1E1E1E));
     expect(result.theme!.sqlSyntax.keyword, const Color(0xFFC586C0));
+  });
+
+  test('all built-in theme TOML assets load successfully', () async {
+    for (final asset in kBuiltInThemeAssets) {
+      final themeSource = await rootBundle.loadString(asset.assetPath);
+      final parsed = parser.parse(themeSource, sourceLabel: asset.assetPath);
+
+      expect(parsed.isSuccess, isTrue, reason: asset.assetPath);
+      final result = validator.validate(
+        parsed.document!,
+        fallbackTheme: buildEmergencyTheme(
+          brightness: asset.brightness,
+          id: asset.id,
+          name: asset.name,
+        ),
+        isBuiltIn: true,
+      );
+
+      expect(result.isSuccess, isTrue, reason: asset.assetPath);
+      expect(result.theme!.id, asset.id, reason: asset.assetPath);
+    }
   });
 
   test('invalid color format is rejected', () async {

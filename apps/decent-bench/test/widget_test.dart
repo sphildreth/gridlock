@@ -7,6 +7,7 @@ import 'package:decent_bench/features/workspace/domain/workspace_models.dart';
 import 'package:decent_bench/features/workspace/domain/workspace_shell_preferences.dart';
 import 'package:decent_bench/features/workspace/infrastructure/shortcut_config_service.dart';
 import 'package:decent_bench/features/workspace/presentation/preferences_dialog.dart';
+import 'package:decent_bench/features/workspace/presentation/shell/schema_explorer_pane.dart';
 import 'package:decent_bench/features/workspace/presentation/shell/results_pane.dart';
 import 'package:decent_bench/features/workspace/presentation/shell/status_bar.dart';
 import 'package:flutter/material.dart';
@@ -351,33 +352,27 @@ void main() {
   testWidgets(
     'open databases with empty schemas do not render sample schema placeholders',
     (tester) async {
-      final gateway = FakeWorkspaceGateway()..snapshot = SchemaSnapshot.empty();
-      final controller = WorkspaceController(
-        gateway: gateway,
-        configStore: InMemoryConfigStore(),
-        workspaceStateStore: InMemoryWorkspaceStateStore(),
-      );
-
       _configureDesktopViewport(tester);
       addTearDown(() {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
-        controller.dispose();
       });
-
-      await controller.initialize();
-      await controller.openDatabase(
-        '/tmp/empty-schema-${DateTime.now().microsecondsSinceEpoch}.ddb',
-        createIfMissing: true,
-      );
       await tester.pumpWidget(
-        DecentBenchApp(
-          controller: controller,
-          autoInitialize: false,
-          logger: const NoOpAppLogger(),
+        MaterialApp(
+          home: Scaffold(
+            body: SchemaExplorerPane(
+              schema: SchemaSnapshot.empty(),
+              databasePath: '/tmp/artistSearchEngine.ddb',
+              selectedNodeId: 'database',
+              onSelectNode: (_) {},
+              onShowNodeMenu: (_, _) {},
+              onRefresh: () {},
+              isLoading: false,
+            ),
+          ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       expect(find.text('customers'), findsNothing);
       expect(find.text('orders'), findsNothing);

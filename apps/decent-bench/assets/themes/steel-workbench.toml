@@ -1,0 +1,151 @@
+name = "Steel Workbench"
+id = "steel-workbench"
+version = "1.0.0"
+author = "Decent Bench"
+description = "An industrial charcoal theme with cool steel separators and restrained cyan accents."
+
+[compatibility]
+min_decent_bench_version = "0.1.0"
+max_decent_bench_version = "0.9.x"
+
+[base]
+brightness = "dark"
+
+[colors]
+window_bg = "#161A1F"
+panel_bg = "#1E242B"
+panel_alt_bg = "#262D36"
+surface_bg = "#1B2128"
+overlay_bg = "#2C3440"
+border = "#3A434E"
+border_strong = "#54606E"
+text = "#E8EDF2"
+text_muted = "#A7B0BA"
+text_disabled = "#6E7883"
+accent = "#4FB3BF"
+accent_hover = "#6BC9D4"
+accent_active = "#368E99"
+selection = "#2C4950"
+focus_ring = "#86E0EA"
+error = "#E36D6D"
+warning = "#D8A24A"
+success = "#66B78A"
+info = "#53C3E8"
+
+[menu]
+bg = "#262D36"
+text = "#E8EDF2"
+text_muted = "#A7B0BA"
+item_hover_bg = "#2D454F"
+item_active_bg = "#2A4852"
+separator = "#3A434E"
+icon = "#D6E6EC"
+shortcut = "#A7B0BA"
+
+[toolbar]
+bg = "#1C222A"
+button_bg = "#1D232A"
+button_hover_bg = "#263D45"
+button_active_bg = "#233D45"
+button_text = "#E8EDF2"
+button_icon = "#DCE8EE"
+
+[status_bar]
+bg = "#1A1E24"
+text = "#E8EDF2"
+border_top = "#54606E"
+success = "#66B78A"
+warning = "#D8A24A"
+error = "#E36D6D"
+
+[sidebar]
+bg = "#1E242B"
+header_bg = "#2A313A"
+header_text = "#FFFFFF"
+item_text = "#E8EDF2"
+item_hover_bg = "#253840"
+item_selected_bg = "#2F5159"
+item_selected_text = "#FFFFFF"
+tree_line = "#54606E"
+
+[properties]
+bg = "#1E242B"
+label = "#A7B0BA"
+value = "#E8EDF2"
+section_header_bg = "#2A313A"
+section_header_text = "#FFFFFF"
+
+[editor]
+bg = "#161A1F"
+text = "#E8EDF2"
+gutter_bg = "#1E242B"
+gutter_text = "#6E7883"
+current_line_bg = "#1B262C"
+selection_bg = "#2C4950"
+cursor = "#FFFFFF"
+whitespace = "#4C5661"
+indent_guide = "#2F3740"
+tab_active_bg = "#161A1F"
+tab_inactive_bg = "#262D36"
+tab_hover_bg = "#2B3D46"
+tab_active_text = "#FFFFFF"
+tab_inactive_text = "#A7B0BA"
+
+[results_grid]
+bg = "#191E23"
+header_bg = "#283039"
+header_text = "#FFFFFF"
+row_bg = "#191E23"
+row_alt_bg = "#20252A"
+row_hover_bg = "#1F3036"
+row_selected_bg = "#2C4950"
+row_selected_text = "#FFFFFF"
+grid_line = "#54606E"
+cell_text = "#E8EDF2"
+null_text = "#6E7883"
+
+[dialog]
+bg = "#1E242B"
+title_text = "#E8EDF2"
+body_text = "#DEE4EA"
+input_bg = "#1A2026"
+input_text = "#FFFFFF"
+input_border = "#3A434E"
+input_focus_border = "#7DD8E2"
+
+[buttons]
+primary_bg = "#4FB3BF"
+primary_text = "#000000"
+primary_hover_bg = "#6BC9D4"
+secondary_bg = "#1D232A"
+secondary_text = "#FFFFFF"
+secondary_hover_bg = "#23343C"
+danger_bg = "#E36D6D"
+danger_text = "#000000"
+
+[sql_syntax]
+keyword = "#CF8E6D"
+identifier = "#A7C7FF"
+string = "#B5CEA8"
+number = "#D9A761"
+comment = "#7A8794"
+operator = "#E6EAF0"
+function = "#7CC6FE"
+type = "#E7C47A"
+parameter = "#D6E5F3"
+constant = "#9CDCFE"
+error = "#FF6B81"
+
+[fonts]
+ui_family = "Inter"
+editor_family = "JetBrains Mono"
+ui_size = 12
+editor_size = 12
+line_height = 1.3
+
+[metrics]
+border_radius = 3
+pane_padding = 5
+control_height = 26
+splitter_thickness = 6
+icon_size = 16
