@@ -862,30 +862,48 @@ class _ResultsEmptyState extends StatelessWidget {
         : tab.lastSql != null
         ? 'Query returned no rows.'
         : 'Run a query to populate the results grid.';
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(Icons.table_rows_outlined, size: 28),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.titleMedium,
-              textAlign: TextAlign.center,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontalPadding = math.min(24.0, constraints.maxWidth / 10);
+        final verticalPadding = math.min(24.0, constraints.maxHeight / 6);
+        final minWidth = math.max(0.0, constraints.maxWidth - (horizontalPadding * 2));
+        final minHeight = math.max(0.0, constraints.maxHeight - (verticalPadding * 2));
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
+            vertical: verticalPadding,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minWidth: minWidth,
+              minHeight: minHeight,
             ),
-            if (tab.statusMessage != null) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                tab.statusMessage!,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(Icons.table_rows_outlined, size: 28),
+                  const SizedBox(height: 10),
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  if (tab.statusMessage != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      tab.statusMessage!,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ],
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

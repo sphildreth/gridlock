@@ -379,4 +379,66 @@ void main() {
       expect(find.text('active_orders'), findsNothing);
     },
   );
+
+  testWidgets('results empty state avoids overflow in short panels', (
+    tester,
+  ) async {
+    final verticalScrollController = ScrollController();
+    final horizontalScrollController = ScrollController();
+    final tab = QueryTabState.initial(id: 'tab-1', title: 'Query 1').copyWith(
+      lastSql: 'SELECT * FROM tasks',
+      statusMessage:
+          'Ready. Execute a query to capture elapsed time, row counts, and warnings.',
+    );
+    final previousOnError = FlutterError.onError;
+    FlutterErrorDetails? overflowError;
+
+    _configureDesktopViewport(tester);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      verticalScrollController.dispose();
+      horizontalScrollController.dispose();
+      FlutterError.onError = previousOnError;
+    });
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('RenderFlex overflowed')) {
+        overflowError = details;
+      }
+      previousOnError?.call(details);
+    };
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 1200,
+              height: 140,
+              child: Material(
+                child: ResultsPane(
+                  activeTab: tab,
+                  activeResultsTab: ResultsPaneTab.results,
+                  verticalScrollController: verticalScrollController,
+                  horizontalScrollController: horizontalScrollController,
+                  interactionState: const ResultsGridInteractionState(),
+                  onResultsTabChanged: (_) {},
+                  onLoadNextPage: () {},
+                  onSelectCell: (_, _) {},
+                  onShowCellMenu: (_, _, _) {},
+                  onSelectRow: (_) {},
+                  onTogglePinnedColumn: (_) {},
+                  usePlaceholderContent: false,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(overflowError, isNull);
+    expect(find.text('Query returned no rows.'), findsOneWidget);
+  });
 }
