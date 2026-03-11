@@ -709,10 +709,15 @@ void main() {
     'excel import inspection loads sheets, previews, and import summary',
     () async {
       final gateway = FakeWorkspaceGateway();
+      final logger = RecordingAppLogger();
+      final config = AppConfig.defaults().copyWith(
+        logging: const LoggingSettings(verbosity: LogVerbosity.debug),
+      );
       final controller = WorkspaceController(
         gateway: gateway,
-        configStore: InMemoryConfigStore(),
+        configStore: InMemoryConfigStore(config),
         workspaceStateStore: InMemoryWorkspaceStateStore(),
+        logger: logger,
       );
       await controller.initialize();
 
@@ -747,6 +752,30 @@ void main() {
         controller.excelImportSession?.summary?.importedTables,
         contains('imported_people'),
       );
+      final excelSummary = controller.excelImportSession!.summary!;
+      final completionEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_excel_import',
+      );
+      final completionDetails = completionEntry.details!;
+      expect(completionEntry.category, 'import.excel');
+      expect(completionEntry.rowCount, excelSummary.totalRowsCopied);
+      expect(completionEntry.elapsedNanos, greaterThan(0));
+      expect(completionEntry.databasePath, endsWith('.ddb'));
+      expect(completionDetails['total_rows_copied'], excelSummary.totalRowsCopied);
+      expect(
+        completionDetails['rows_copied_by_table'],
+        excelSummary.rowsCopiedByTable,
+      );
+      final warningEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_excel_import_warnings',
+      );
+      final warningDetails = warningEntry.details!;
+      expect(warningEntry.level, LogVerbosity.warning);
+      expect(warningDetails['warning_count'], 1);
+      expect(
+        warningDetails['warnings'],
+        contains('Workbook formulas are imported as formula text.'),
+      );
     },
   );
 
@@ -778,10 +807,15 @@ void main() {
     'sql dump import inspection loads parsed tables, warnings, and import summary',
     () async {
       final gateway = FakeWorkspaceGateway();
+      final logger = RecordingAppLogger();
+      final config = AppConfig.defaults().copyWith(
+        logging: const LoggingSettings(verbosity: LogVerbosity.debug),
+      );
       final controller = WorkspaceController(
         gateway: gateway,
-        configStore: InMemoryConfigStore(),
+        configStore: InMemoryConfigStore(config),
         workspaceStateStore: InMemoryWorkspaceStateStore(),
+        logger: logger,
       );
       await controller.initialize();
 
@@ -827,6 +861,32 @@ void main() {
         controller.sqlDumpImportSession?.summary?.importedTables,
         contains('imported_people'),
       );
+      final sqlDumpSummary = controller.sqlDumpImportSession!.summary!;
+      final completionEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_sql_dump_import',
+      );
+      final completionDetails = completionEntry.details!;
+      expect(completionEntry.category, 'import.sql_dump');
+      expect(completionEntry.rowCount, sqlDumpSummary.totalRowsCopied);
+      expect(completionEntry.elapsedNanos, greaterThan(0));
+      expect(
+        completionDetails['total_rows_copied'],
+        sqlDumpSummary.totalRowsCopied,
+      );
+      expect(
+        completionDetails['skipped_statement_count'],
+        sqlDumpSummary.skippedStatementCount,
+      );
+      expect(
+        completionDetails['rows_copied_by_table'],
+        sqlDumpSummary.rowsCopiedByTable,
+      );
+      final warningEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_sql_dump_import_warnings',
+      );
+      final warningDetails = warningEntry.details!;
+      expect(warningEntry.level, LogVerbosity.warning);
+      expect(warningDetails['warning_count'], greaterThan(0));
     },
   );
 
@@ -864,10 +924,15 @@ void main() {
     'sqlite import inspection loads tables, previews, and import summary',
     () async {
       final gateway = FakeWorkspaceGateway();
+      final logger = RecordingAppLogger();
+      final config = AppConfig.defaults().copyWith(
+        logging: const LoggingSettings(verbosity: LogVerbosity.debug),
+      );
       final controller = WorkspaceController(
         gateway: gateway,
-        configStore: InMemoryConfigStore(),
+        configStore: InMemoryConfigStore(config),
         workspaceStateStore: InMemoryWorkspaceStateStore(),
+        logger: logger,
       );
       await controller.initialize();
 
@@ -906,6 +971,30 @@ void main() {
         controller.sqliteImportSession?.summary?.importedTables,
         contains('imported_users'),
       );
+      final sqliteSummary = controller.sqliteImportSession!.summary!;
+      final completionEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_sqlite_import',
+      );
+      final completionDetails = completionEntry.details!;
+      expect(completionEntry.category, 'import.sqlite');
+      expect(completionEntry.rowCount, sqliteSummary.totalRowsCopied);
+      expect(completionEntry.elapsedNanos, greaterThan(0));
+      expect(
+        completionDetails['total_rows_copied'],
+        sqliteSummary.totalRowsCopied,
+      );
+      expect(completionDetails['index_count'], sqliteSummary.indexesCreated.length);
+      expect(completionDetails['skipped_item_count'], sqliteSummary.skippedItems.length);
+      expect(
+        completionDetails['rows_copied_by_table'],
+        sqliteSummary.rowsCopiedByTable,
+      );
+      final warningEntry = logger.entries.lastWhere(
+        (entry) => entry.operation == 'run_sqlite_import_warnings',
+      );
+      final warningDetails = warningEntry.details!;
+      expect(warningEntry.level, LogVerbosity.warning);
+      expect(warningDetails['warning_count'], greaterThan(0));
     },
   );
 

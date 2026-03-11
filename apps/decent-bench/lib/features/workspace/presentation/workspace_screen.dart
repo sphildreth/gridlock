@@ -1944,6 +1944,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       builder: (context) => GenericImportDialog(
         initialSourcePath: sourcePath,
         initialFormat: format,
+        logger: widget.controller.logger,
       ),
     );
     if (!mounted) {

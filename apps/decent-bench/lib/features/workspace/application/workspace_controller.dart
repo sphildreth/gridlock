@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../app/logging/app_logger.dart';
+import '../../../app/logging/import_log_details.dart';
 import '../domain/app_config.dart';
 import '../domain/excel_import_models.dart';
 import '../domain/sql_dump_import_models.dart';
@@ -103,6 +104,8 @@ class WorkspaceController extends ChangeNotifier {
   bool get canRunActiveTab => canRunTab(activeTabId);
 
   bool get canCancelActiveTab => tabById(activeTabId)?.canCancel ?? false;
+
+  AppLogger get logger => _logger;
 
   void _logDebug(
     String operation,
@@ -1484,13 +1487,27 @@ class WorkspaceController extends ChangeNotifier {
         'Loaded Excel import inspection.',
         category: 'import.excel',
         elapsedNanos: _durationToNanos(stopwatch.elapsed),
-        details: <String, Object?>{
-          'source_path': inspection.sourcePath,
-          'sheet_count': inspection.sheets.length,
-          'warning_count': inspection.warnings.length,
-          'header_row': inspection.headerRow,
-        },
+        details: buildImportInspectionLogDetails(
+          sourcePath: inspection.sourcePath,
+          tableCount: inspection.sheets.length,
+          warnings: inspection.warnings,
+          extra: <String, Object?>{'header_row': inspection.headerRow},
+        ),
       );
+      if (inspection.warnings.isNotEmpty) {
+        _logWarning(
+          'inspect_excel_source_warnings',
+          'Excel inspection produced warnings.',
+          category: 'import.excel',
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          details: buildImportInspectionLogDetails(
+            sourcePath: inspection.sourcePath,
+            tableCount: inspection.sheets.length,
+            warnings: inspection.warnings,
+            extra: <String, Object?>{'header_row': inspection.headerRow},
+          ),
+        );
+      }
       _safeNotify();
     } catch (error) {
       _setExcelImportError(error.toString(), phase: ExcelImportJobPhase.failed);
@@ -1703,12 +1720,7 @@ class WorkspaceController extends ChangeNotifier {
       'run_excel_import',
       'Starting Excel import.',
       category: 'import.excel',
-      details: <String, Object?>{
-        'job_id': jobId,
-        'source_path': request.sourcePath,
-        'target_path': request.targetPath,
-        'sheet_count': request.selectedSheets.length,
-      },
+      details: buildExcelImportRequestLogDetails(request),
     );
 
     _excelImportSubscription = _gateway.importExcel(request: request).listen((
@@ -1730,41 +1742,58 @@ class WorkspaceController extends ChangeNotifier {
           );
           break;
         case ExcelImportUpdateKind.completed:
+          final summary = update.summary;
           excelImportSession = current.copyWith(
             step: ExcelImportWizardStep.summary,
             phase: ExcelImportJobPhase.completed,
-            summary: update.summary,
+            summary: summary,
             error: null,
           );
-          workspaceMessage = update.summary?.statusMessage;
+          workspaceMessage = summary?.statusMessage;
           workspaceError = null;
           _logInfo(
             'run_excel_import',
             'Excel import completed.',
             category: 'import.excel',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
-            details: <String, Object?>{
-              'job_id': update.jobId,
-              'target_path': update.summary?.targetPath,
-              'imported_tables': update.summary?.importedTables.length ?? 0,
-            },
+            details: summary == null
+                ? <String, Object?>{'job_id': update.jobId}
+                : buildExcelImportSummaryLogDetails(summary),
           );
+          if (summary != null && summary.warnings.isNotEmpty) {
+            _logWarning(
+              'run_excel_import_warnings',
+              'Excel import completed with warnings.',
+              category: 'import.excel',
+              databasePath: summary.targetPath,
+              rowCount: summary.totalRowsCopied,
+              elapsedNanos: _durationToNanos(stopwatch.elapsed),
+              details: buildExcelImportSummaryLogDetails(summary),
+            );
+          }
           break;
         case ExcelImportUpdateKind.cancelled:
+          final summary = update.summary;
           excelImportSession = current.copyWith(
             step: ExcelImportWizardStep.summary,
             phase: ExcelImportJobPhase.cancelled,
-            summary: update.summary,
+            summary: summary,
             error: null,
           );
-          workspaceMessage = update.summary?.statusMessage;
+          workspaceMessage = summary?.statusMessage;
           workspaceError = null;
           _logWarning(
             'run_excel_import',
             'Excel import was cancelled.',
             category: 'import.excel',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
-            details: <String, Object?>{'job_id': update.jobId},
+            details: summary == null
+                ? <String, Object?>{'job_id': update.jobId}
+                : buildExcelImportSummaryLogDetails(summary),
           );
           break;
         case ExcelImportUpdateKind.failed:
@@ -1780,6 +1809,9 @@ class WorkspaceController extends ChangeNotifier {
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
             details: <String, Object?>{
               'job_id': update.jobId,
+              'source_path': current.sourcePath,
+              'target_path': current.targetPath,
+              'selected_sheet_count': current.selectedSheets.length,
               'message': update.message,
             },
           );
@@ -1932,14 +1964,33 @@ class WorkspaceController extends ChangeNotifier {
         'Loaded SQL dump inspection.',
         category: 'import.sql_dump',
         elapsedNanos: _durationToNanos(stopwatch.elapsed),
-        details: <String, Object?>{
-          'source_path': inspection.sourcePath,
-          'table_count': inspection.tables.length,
-          'warning_count': inspection.warnings.length,
-          'skipped_statement_count': inspection.skippedStatements.length,
-          'encoding': inspection.resolvedEncoding,
-        },
+        details: buildImportInspectionLogDetails(
+          sourcePath: inspection.sourcePath,
+          tableCount: inspection.tables.length,
+          warnings: inspection.warnings,
+          extra: <String, Object?>{
+            'skipped_statement_count': inspection.skippedStatements.length,
+            'encoding': inspection.resolvedEncoding,
+          },
+        ),
       );
+      if (inspection.warnings.isNotEmpty) {
+        _logWarning(
+          'inspect_sql_dump_source_warnings',
+          'SQL dump inspection produced warnings.',
+          category: 'import.sql_dump',
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          details: buildImportInspectionLogDetails(
+            sourcePath: inspection.sourcePath,
+            tableCount: inspection.tables.length,
+            warnings: inspection.warnings,
+            extra: <String, Object?>{
+              'skipped_statement_count': inspection.skippedStatements.length,
+              'encoding': inspection.resolvedEncoding,
+            },
+          ),
+        );
+      }
       _safeNotify();
     } catch (error) {
       _setSqlDumpImportError(
@@ -2155,12 +2206,7 @@ class WorkspaceController extends ChangeNotifier {
       'run_sql_dump_import',
       'Starting SQL dump import.',
       category: 'import.sql_dump',
-      details: <String, Object?>{
-        'job_id': jobId,
-        'source_path': request.sourcePath,
-        'target_path': request.targetPath,
-        'table_count': request.selectedTables.length,
-      },
+      details: buildSqlDumpImportRequestLogDetails(request),
     );
 
     _sqlDumpImportSubscription = _gateway
@@ -2182,41 +2228,58 @@ class WorkspaceController extends ChangeNotifier {
               );
               break;
             case SqlDumpImportUpdateKind.completed:
+              final summary = update.summary;
               sqlDumpImportSession = current.copyWith(
                 step: SqlDumpImportWizardStep.summary,
                 phase: SqlDumpImportJobPhase.completed,
-                summary: update.summary,
+                summary: summary,
                 error: null,
               );
-              workspaceMessage = update.summary?.statusMessage;
+              workspaceMessage = summary?.statusMessage;
               workspaceError = null;
               _logInfo(
                 'run_sql_dump_import',
                 'SQL dump import completed.',
                 category: 'import.sql_dump',
+                databasePath: summary?.targetPath,
+                rowCount: summary?.totalRowsCopied,
                 elapsedNanos: _durationToNanos(stopwatch.elapsed),
-                details: <String, Object?>{
-                  'job_id': update.jobId,
-                  'target_path': update.summary?.targetPath,
-                  'imported_tables': update.summary?.importedTables.length ?? 0,
-                },
+                details: summary == null
+                    ? <String, Object?>{'job_id': update.jobId}
+                    : buildSqlDumpImportSummaryLogDetails(summary),
               );
+              if (summary != null && summary.warnings.isNotEmpty) {
+                _logWarning(
+                  'run_sql_dump_import_warnings',
+                  'SQL dump import completed with warnings.',
+                  category: 'import.sql_dump',
+                  databasePath: summary.targetPath,
+                  rowCount: summary.totalRowsCopied,
+                  elapsedNanos: _durationToNanos(stopwatch.elapsed),
+                  details: buildSqlDumpImportSummaryLogDetails(summary),
+                );
+              }
               break;
             case SqlDumpImportUpdateKind.cancelled:
+              final summary = update.summary;
               sqlDumpImportSession = current.copyWith(
                 step: SqlDumpImportWizardStep.summary,
                 phase: SqlDumpImportJobPhase.cancelled,
-                summary: update.summary,
+                summary: summary,
                 error: null,
               );
-              workspaceMessage = update.summary?.statusMessage;
+              workspaceMessage = summary?.statusMessage;
               workspaceError = null;
               _logWarning(
                 'run_sql_dump_import',
                 'SQL dump import was cancelled.',
                 category: 'import.sql_dump',
+                databasePath: summary?.targetPath,
+                rowCount: summary?.totalRowsCopied,
                 elapsedNanos: _durationToNanos(stopwatch.elapsed),
-                details: <String, Object?>{'job_id': update.jobId},
+                details: summary == null
+                    ? <String, Object?>{'job_id': update.jobId}
+                    : buildSqlDumpImportSummaryLogDetails(summary),
               );
               break;
             case SqlDumpImportUpdateKind.failed:
@@ -2232,6 +2295,9 @@ class WorkspaceController extends ChangeNotifier {
                 elapsedNanos: _durationToNanos(stopwatch.elapsed),
                 details: <String, Object?>{
                   'job_id': update.jobId,
+                  'source_path': current.sourcePath,
+                  'target_path': current.targetPath,
+                  'selected_table_count': current.selectedTables.length,
                   'message': update.message,
                 },
               );
@@ -2381,12 +2447,25 @@ class WorkspaceController extends ChangeNotifier {
         'Loaded SQLite source inspection.',
         category: 'import.sqlite',
         elapsedNanos: _durationToNanos(stopwatch.elapsed),
-        details: <String, Object?>{
-          'source_path': inspection.sourcePath,
-          'table_count': inspection.tables.length,
-          'warning_count': inspection.warnings.length,
-        },
+        details: buildImportInspectionLogDetails(
+          sourcePath: inspection.sourcePath,
+          tableCount: inspection.tables.length,
+          warnings: inspection.warnings,
+        ),
       );
+      if (inspection.warnings.isNotEmpty) {
+        _logWarning(
+          'inspect_sqlite_source_warnings',
+          'SQLite inspection produced warnings.',
+          category: 'import.sqlite',
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          details: buildImportInspectionLogDetails(
+            sourcePath: inspection.sourcePath,
+            tableCount: inspection.tables.length,
+            warnings: inspection.warnings,
+          ),
+        );
+      }
       _safeNotify();
       if (focused != null) {
         await loadSqliteImportPreview(focused);
@@ -2643,12 +2722,7 @@ class WorkspaceController extends ChangeNotifier {
       'run_sqlite_import',
       'Starting SQLite import.',
       category: 'import.sqlite',
-      details: <String, Object?>{
-        'job_id': jobId,
-        'source_path': request.sourcePath,
-        'target_path': request.targetPath,
-        'table_count': request.selectedTables.length,
-      },
+      details: buildSqliteImportRequestLogDetails(request),
     );
 
     _sqliteImportSubscription = _gateway.importSqlite(request: request).listen((
@@ -2670,41 +2744,58 @@ class WorkspaceController extends ChangeNotifier {
           );
           break;
         case SqliteImportUpdateKind.completed:
+          final summary = update.summary;
           sqliteImportSession = current.copyWith(
             step: SqliteImportWizardStep.summary,
             phase: SqliteImportJobPhase.completed,
-            summary: update.summary,
+            summary: summary,
             error: null,
           );
-          workspaceMessage = update.summary?.statusMessage;
+          workspaceMessage = summary?.statusMessage;
           workspaceError = null;
           _logInfo(
             'run_sqlite_import',
             'SQLite import completed.',
             category: 'import.sqlite',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
-            details: <String, Object?>{
-              'job_id': update.jobId,
-              'target_path': update.summary?.targetPath,
-              'imported_tables': update.summary?.importedTables.length ?? 0,
-            },
+            details: summary == null
+                ? <String, Object?>{'job_id': update.jobId}
+                : buildSqliteImportSummaryLogDetails(summary),
           );
+          if (summary != null && summary.warnings.isNotEmpty) {
+            _logWarning(
+              'run_sqlite_import_warnings',
+              'SQLite import completed with warnings.',
+              category: 'import.sqlite',
+              databasePath: summary.targetPath,
+              rowCount: summary.totalRowsCopied,
+              elapsedNanos: _durationToNanos(stopwatch.elapsed),
+              details: buildSqliteImportSummaryLogDetails(summary),
+            );
+          }
           break;
         case SqliteImportUpdateKind.cancelled:
+          final summary = update.summary;
           sqliteImportSession = current.copyWith(
             step: SqliteImportWizardStep.summary,
             phase: SqliteImportJobPhase.cancelled,
-            summary: update.summary,
+            summary: summary,
             error: null,
           );
-          workspaceMessage = update.summary?.statusMessage;
+          workspaceMessage = summary?.statusMessage;
           workspaceError = null;
           _logWarning(
             'run_sqlite_import',
             'SQLite import was cancelled.',
             category: 'import.sqlite',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
-            details: <String, Object?>{'job_id': update.jobId},
+            details: summary == null
+                ? <String, Object?>{'job_id': update.jobId}
+                : buildSqliteImportSummaryLogDetails(summary),
           );
           break;
         case SqliteImportUpdateKind.failed:
@@ -2720,6 +2811,9 @@ class WorkspaceController extends ChangeNotifier {
             elapsedNanos: _durationToNanos(stopwatch.elapsed),
             details: <String, Object?>{
               'job_id': update.jobId,
+              'source_path': current.sourcePath,
+              'target_path': current.targetPath,
+              'selected_table_count': current.selectedTables.length,
               'message': update.message,
             },
           );

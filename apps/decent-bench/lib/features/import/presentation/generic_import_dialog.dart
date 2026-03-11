@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../../../app/logging/app_logger.dart';
+import '../../../app/logging/import_log_details.dart';
 import '../../workspace/domain/import_target_types.dart';
 import '../../workspace/domain/workspace_models.dart';
 import '../domain/import_models.dart';
@@ -36,12 +38,14 @@ class GenericImportDialog extends StatefulWidget {
     super.key,
     required this.initialSourcePath,
     required this.initialFormat,
+    this.logger,
     this.previewService,
     this.executionService,
   });
 
   final String initialSourcePath;
   final ImportFormatDefinition initialFormat;
+  final AppLogger? logger;
   final ImportPreviewService? previewService;
   final ImportExecutionService? executionService;
 
@@ -50,6 +54,7 @@ class GenericImportDialog extends StatefulWidget {
 }
 
 class _GenericImportDialogState extends State<GenericImportDialog> {
+  late final AppLogger _logger = widget.logger ?? const NoOpAppLogger();
   late final ImportPreviewService _previewService =
       widget.previewService ?? ImportPreviewService();
   late final ImportExecutionService _executionService =
@@ -71,6 +76,73 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   bool _importIntoExistingTarget = false;
   bool _replaceExistingTarget = true;
   String? _focusedTableId;
+
+  int _durationToNanos(Duration duration) => duration.inMicroseconds * 1000;
+
+  void _logInfo(
+    String operation,
+    String message, {
+    String? databasePath,
+    int? rowCount,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+  }) {
+    _logger.info(
+      category: 'import.generic',
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      rowCount: rowCount,
+      elapsedNanos: elapsedNanos,
+      details: details,
+    );
+  }
+
+  void _logWarning(
+    String operation,
+    String message, {
+    String? databasePath,
+    int? rowCount,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    _logger.warning(
+      category: 'import.generic',
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      rowCount: rowCount,
+      elapsedNanos: elapsedNanos,
+      details: details,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  void _logError(
+    String operation,
+    String message, {
+    String? databasePath,
+    int? rowCount,
+    int? elapsedNanos,
+    Map<String, Object?>? details,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    _logger.error(
+      category: 'import.generic',
+      operation: operation,
+      message: message,
+      databasePath: databasePath,
+      rowCount: rowCount,
+      elapsedNanos: elapsedNanos,
+      details: details,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
 
   @override
   void initState() {
@@ -923,6 +995,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   }
 
   Future<void> _inspectSource() async {
+    final stopwatch = Stopwatch()..start();
     final sourcePath = _sourcePathController.text.trim();
     if (sourcePath.isEmpty) {
       setState(() {
@@ -941,6 +1014,30 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
         format: widget.initialFormat,
         options: _options,
       );
+      final details = buildImportInspectionLogDetails(
+        sourcePath: inspection.sourcePath,
+        tableCount: inspection.tables.length,
+        warnings: inspection.warnings,
+        extra: <String, Object?>{
+          'format_key': widget.initialFormat.key.name,
+          'format_label': widget.initialFormat.label,
+          if (inspection.explanation != null) 'explanation': inspection.explanation,
+        },
+      );
+      _logInfo(
+        'inspect_generic_import_source',
+        'Loaded generic import inspection.',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        details: details,
+      );
+      if (inspection.warnings.isNotEmpty) {
+        _logWarning(
+          'inspect_generic_import_source_warnings',
+          'Generic import inspection produced warnings.',
+          elapsedNanos: _durationToNanos(stopwatch.elapsed),
+          details: details,
+        );
+      }
       if (!mounted) {
         return;
       }
@@ -953,6 +1050,17 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
             : inspection.tables.first.sourceId;
       });
     } catch (error) {
+      _logError(
+        'inspect_generic_import_source',
+        'Generic import inspection failed.',
+        elapsedNanos: _durationToNanos(stopwatch.elapsed),
+        error: error,
+        details: <String, Object?>{
+          'source_path': sourcePath,
+          'format_key': widget.initialFormat.key.name,
+          'format_label': widget.initialFormat.label,
+        },
+      );
       if (!mounted) {
         return;
       }
@@ -964,6 +1072,7 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
   }
 
   Future<void> _runImport() async {
+    final stopwatch = Stopwatch()..start();
     final inspection = _inspection;
     if (inspection == null) {
       setState(() {
@@ -988,31 +1097,100 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
       _summary = null;
       _error = null;
     });
+    _logInfo(
+      'run_generic_import',
+      'Starting generic import.',
+      details: buildGenericImportRequestLogDetails(
+        request: request,
+        formatLabel: widget.initialFormat.label,
+      ),
+    );
     _importSubscription = _executionService.execute(request: request).listen((
       update,
     ) {
-      if (!mounted) {
-        return;
-      }
       switch (update.kind) {
         case GenericImportUpdateKind.progress:
+          if (!mounted) {
+            return;
+          }
           setState(() {
             _phase = GenericImportJobPhase.running;
             _progress = update.progress;
           });
         case GenericImportUpdateKind.completed:
+          final summary = update.summary;
+          _logInfo(
+            'run_generic_import',
+            'Generic import completed.',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: summary == null
+                ? <String, Object?>{
+                    'job_id': update.jobId,
+                    'format_label': widget.initialFormat.label,
+                  }
+                : buildGenericImportSummaryLogDetails(summary),
+          );
+          if (summary != null && summary.warnings.isNotEmpty) {
+            _logWarning(
+              'run_generic_import_warnings',
+              'Generic import completed with warnings.',
+              databasePath: summary.targetPath,
+              rowCount: summary.totalRowsCopied,
+              elapsedNanos: _durationToNanos(stopwatch.elapsed),
+              details: buildGenericImportSummaryLogDetails(summary),
+            );
+          }
+          if (!mounted) {
+            return;
+          }
           setState(() {
             _phase = GenericImportJobPhase.completed;
-            _summary = update.summary;
+            _summary = summary;
             _step = GenericImportWizardStep.summary;
           });
         case GenericImportUpdateKind.cancelled:
+          final summary = update.summary;
+          _logWarning(
+            'run_generic_import',
+            'Generic import was cancelled.',
+            databasePath: summary?.targetPath,
+            rowCount: summary?.totalRowsCopied,
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: summary == null
+                ? <String, Object?>{
+                    'job_id': update.jobId,
+                    'format_label': widget.initialFormat.label,
+                  }
+                : buildGenericImportSummaryLogDetails(summary),
+          );
+          if (!mounted) {
+            return;
+          }
           setState(() {
             _phase = GenericImportJobPhase.cancelled;
-            _summary = update.summary;
+            _summary = summary;
             _step = GenericImportWizardStep.summary;
           });
         case GenericImportUpdateKind.failed:
+          _logError(
+            'run_generic_import',
+            'Generic import failed.',
+            elapsedNanos: _durationToNanos(stopwatch.elapsed),
+            details: <String, Object?>{
+              'job_id': update.jobId,
+              'source_path': request.sourcePath,
+              'target_path': request.targetPath,
+              'format_key': request.formatKey.name,
+              'format_label': widget.initialFormat.label,
+              'selected_table_count': request.selectedTables.length,
+              'message': update.message,
+            },
+          );
+          if (!mounted) {
+            return;
+          }
           setState(() {
             _phase = GenericImportJobPhase.failed;
             _error = update.message ?? 'The import failed.';
@@ -1028,6 +1206,17 @@ class _GenericImportDialogState extends State<GenericImportDialog> {
     if (jobId == null) {
       return;
     }
+    _logWarning(
+      'cancel_generic_import',
+      'Cancelling generic import.',
+      details: <String, Object?>{
+        'job_id': jobId,
+        'source_path': _sourcePathController.text.trim(),
+        'target_path': _targetPathController.text.trim(),
+        'format_key': widget.initialFormat.key.name,
+        'format_label': widget.initialFormat.label,
+      },
+    );
     setState(() {
       _phase = GenericImportJobPhase.cancelling;
     });
