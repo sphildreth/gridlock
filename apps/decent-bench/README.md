@@ -7,22 +7,27 @@ Decent Bench.
 
 - `pubspec.yaml`, `lib/`, `test/`, and `integration_test/` are present
 - the workspace controller, multi-tab UI, desktop bridge, autocomplete,
-  snippets, formatter, drag-and-drop entry flow, SQLite import wizard, Excel
-  import wizard, and SQL dump import wizard are in place
+  snippets, formatter, drag-and-drop entry flow, shared import registry,
+  generic import wizard, SQLite import wizard, Excel import wizard, and SQL
+  dump import wizard are in place
 - reopening the same DecentDB file restores persisted query tabs for that
   workspace
 - editor settings and SQL snippets persist in `config.toml`
 - SQLite, Excel, and SQL dump inspection plus import execution run off the UI
   thread
+- CSV, TSV, generic delimited text, JSON, NDJSON/JSONL, XML, HTML tables, and
+  ZIP/GZip wrapper routing now use the generic import preview/execution path
 - desktop runner folders (`linux/`, `macos/`, `windows/`) are checked in
 - the DecentDB Dart package is consumed from a local sibling checkout at
   `../../../decentdb/bindings/dart/dart`
-- Excel import currently supports `.xlsx`; legacy `.xls` files are detected and
-  surfaced with a conversion hint to save as `.xlsx`
+- Excel import currently supports `.xlsx`; legacy `.xls` files route through
+  the existing conversion/normalization path and remain explicitly partial
 - SQL dump import currently targets the MVP-lite parser scope documented in
   `design/SPEC.md`: common MariaDB/MySQL-style `CREATE TABLE` plus
   `INSERT ... VALUES`, with unsupported statements surfaced as warnings rather
   than hard failures when possible
+- `docs/IMPORT_FORMATS.md` summarizes the currently implemented, partial, and
+  recognized-but-unimplemented import formats
 - native-library resolution now prefers `DECENTDB_NATIVE_LIB`, then bundled
   desktop app locations, then a sibling `../decentdb/build/` checkout, with a
   packaging helper to stage the library into built bundles

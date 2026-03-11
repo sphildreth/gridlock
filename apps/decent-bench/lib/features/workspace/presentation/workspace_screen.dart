@@ -13,6 +13,10 @@ import 'package:path/path.dart' as p;
 import '../../../app/app_metadata.dart';
 import '../../../app/startup_launch_options.dart';
 import '../../../app/theme_system/theme_manager.dart';
+import '../../import/application/import_manager.dart';
+import '../../import/domain/import_models.dart';
+import '../../import/presentation/generic_import_dialog.dart';
+import '../../import/presentation/import_archive_chooser_dialog.dart';
 import '../application/menu_command_registry.dart';
 import '../application/workspace_controller.dart';
 import '../application/workspace_shell_controller.dart';
@@ -104,9 +108,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final SqlAutocompleteEngine _autocompleteEngine =
       const SqlAutocompleteEngine();
   final SqlFormatter _sqlFormatter = const SqlFormatter();
+  final ImportManager _importManager = ImportManager();
 
   bool _didHydrateShellPreferences = false;
   bool _isDropTargetActive = false;
+  bool _genericImportOpen = false;
   bool _showFindBar = false;
   int _findMatchCount = 0;
   int _activeFindMatch = 0;
@@ -244,7 +250,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final usePlaceholderContent = _usePlaceholderContent(controller);
 
         return DropTarget(
-          enable: !controller.hasImportSession,
+          enable: !controller.hasImportSession && !_genericImportOpen,
           onDragEntered: (_) => setState(() => _isDropTargetActive = true),
           onDragExited: (_) => setState(() => _isDropTargetActive = false),
           onDragDone: (details) async {
@@ -1925,41 +1931,68 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     controller.closeSqlDumpImportSession();
   }
 
-  Future<void> _showImportChooser() {
-    return showDialog<void>(
+  Future<void> _showGenericImportDialog({
+    required String sourcePath,
+    required ImportFormatDefinition format,
+  }) async {
+    setState(() {
+      _genericImportOpen = true;
+    });
+    final result = await showDialog<GenericImportDialogResult>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Open Import Wizard'),
-          content: const Text(
-            'Choose the source type to launch a wizard with realistic desktop flow.',
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showExcelImportDialog();
-              },
-              child: const Text('Excel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showSqliteImportDialog();
-              },
-              child: const Text('SQLite'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showSqlDumpImportDialog();
-              },
-              child: const Text('SQL Dump'),
-            ),
-          ],
-        );
-      },
+      barrierDismissible: false,
+      builder: (context) => GenericImportDialog(
+        initialSourcePath: sourcePath,
+        initialFormat: format,
+      ),
     );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _genericImportOpen = false;
+    });
+    if (result != null) {
+      await widget.controller.openDatabase(
+        result.targetPath,
+        createIfMissing: false,
+      );
+    }
+  }
+
+  Future<void> _showImportChooser() async {
+    final file = await openFile(
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(
+          label: 'Import sources',
+          extensions: <String>[
+            'csv',
+            'tsv',
+            'txt',
+            'dat',
+            'log',
+            'json',
+            'jsonl',
+            'ndjson',
+            'xml',
+            'html',
+            'htm',
+            'xlsx',
+            'xls',
+            'db',
+            'sqlite',
+            'sqlite3',
+            'sql',
+            'zip',
+            'gz',
+          ],
+        ),
+      ],
+    );
+    if (file == null) {
+      return;
+    }
+    await _startImportFromPath(file.path);
   }
 
   Future<void> _handleStartupLaunchOptions(
@@ -1980,26 +2013,53 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Future<void> _startImportFromPath(String path) async {
-    switch (detectWorkspaceIncomingFileKind(path)) {
-      case WorkspaceIncomingFileKind.sqlite:
-        await _showSqliteImportDialog(sourcePath: path);
+    final detection = await _importManager.detectSource(path);
+    switch (detection.format.implementationKind) {
+      case ImportImplementationKind.directOpen:
+        await widget.controller.openDatabase(path, createIfMissing: false);
         break;
-      case WorkspaceIncomingFileKind.excel:
-        await _showExcelImportDialog(sourcePath: path);
+      case ImportImplementationKind.legacyWizard:
+        switch (detection.format.key) {
+          case ImportFormatKey.sqlite:
+            await _showSqliteImportDialog(sourcePath: path);
+            break;
+          case ImportFormatKey.xlsx:
+          case ImportFormatKey.xls:
+            await _showExcelImportDialog(sourcePath: path);
+            break;
+          case ImportFormatKey.sqlDump:
+            await _showSqlDumpImportDialog(sourcePath: path);
+            break;
+          default:
+            await _showPlaceholderNotice(
+              'Import unavailable',
+              '${detection.format.label} is detected but still uses a wizard path that is not wired here yet.',
+            );
+            break;
+        }
         break;
-      case WorkspaceIncomingFileKind.sqlDump:
-        await _showSqlDumpImportDialog(sourcePath: path);
-        break;
-      case WorkspaceIncomingFileKind.decentDb:
-        await _showPlaceholderNotice(
-          'Command-line import',
-          '`--import` expects an import source such as SQLite, Excel, or SQL dump. Open DecentDB files without `--import`.',
+      case ImportImplementationKind.genericWizard:
+        await _showGenericImportDialog(
+          sourcePath: path,
+          format: detection.format,
         );
         break;
-      case WorkspaceIncomingFileKind.unknown:
+      case ImportImplementationKind.wrapper:
+        await _handleArchiveImport(detection);
+        break;
+      case ImportImplementationKind.recognizedUnsupported:
+        final note = detection.format.note == null
+            ? ''
+            : '\n\n${detection.format.note}';
         await _showPlaceholderNotice(
-          'Command-line import',
-          'Supported import sources are `.db`/`.sqlite`/`.sqlite3`, `.xls`/`.xlsx`, and `.sql`.',
+          '${detection.format.label} not available yet',
+          'Decent Bench recognizes this format as `${detection.format.supportState.name}`, but it is not implemented in this build yet.$note',
+        );
+        break;
+      case ImportImplementationKind.unknown:
+        await _showPlaceholderNotice(
+          'Unknown file type',
+          'Supported import sources currently include `.csv`, `.tsv`, `.txt`, `.json`, `.jsonl`, `.ndjson`, `.xml`, `.html`, `.db`/`.sqlite`/`.sqlite3`, `.xls`/`.xlsx`, `.sql`, `.zip`, and `.gz`.',
         );
         break;
     }
@@ -2047,7 +2107,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (path == null) {
       await _showPlaceholderNotice(
         'No file detected',
-        'Drop a DecentDB, SQLite, Excel, or SQL dump file to continue.',
+        'Drop a DecentDB or supported import source to continue.',
       );
       return;
     }
@@ -2058,25 +2118,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
-    switch (decision.kind) {
-      case WorkspaceIncomingFileKind.decentDb:
-        await widget.controller.openDatabase(path, createIfMissing: false);
-        break;
-      case WorkspaceIncomingFileKind.sqlite:
-        await _showSqliteImportDialog(sourcePath: path);
-        break;
-      case WorkspaceIncomingFileKind.excel:
-        await _showExcelImportDialog(sourcePath: path);
-        break;
-      case WorkspaceIncomingFileKind.sqlDump:
-        await _showSqlDumpImportDialog(sourcePath: path);
-        break;
-      case WorkspaceIncomingFileKind.unknown:
-        await _showPlaceholderNotice(
-          'Unknown file type',
-          'Supported files are `.ddb`, `.db`/`.sqlite`/`.sqlite3`, `.xls`/`.xlsx`, and `.sql`.',
-        );
-        break;
+    await _startImportFromPath(path);
+  }
+
+  Future<void> _handleArchiveImport(ImportDetectionResult detection) async {
+    if (!detection.hasArchiveCandidates) {
+      await _showPlaceholderNotice(
+        detection.format.label,
+        'No recognized importable files were found inside `${p.basename(detection.sourcePath)}`.',
+      );
+      return;
+    }
+    final candidate = await showDialog<ImportArchiveCandidate>(
+      context: context,
+      builder: (context) => ImportArchiveChooserDialog(
+        archivePath: detection.sourcePath,
+        wrapperLabel: detection.format.label,
+        candidates: detection.archiveCandidates,
+      ),
+    );
+    if (candidate == null) {
+      return;
+    }
+    final extractedPath = await _importManager.extractArchiveCandidate(
+      archivePath: detection.sourcePath,
+      wrapperKey: detection.format.key,
+      candidate: candidate,
+    );
+    try {
+      await _startImportFromPath(extractedPath);
+    } finally {
+      final extractedDir = Directory(p.dirname(extractedPath));
+      if (await extractedDir.exists()) {
+        await extractedDir.delete(recursive: true);
+      }
     }
   }
 

@@ -15,6 +15,11 @@ Apache 2.0 distribution. This file tracks attributions and license details.
   - Copyright: package contributors
   - Source: `https://pub.dev/packages/desktop_drop`
 
+- `archive` `3.6.1`
+  - License: MIT
+  - Copyright: Brendan Duncan
+  - Source: `https://pub.dev/packages/archive`
+
 - `excel` `4.0.6`
   - License: MIT
   - Copyright: package contributors
@@ -25,7 +30,17 @@ Apache 2.0 distribution. This file tracks attributions and license details.
   - Copyright: The Flutter Authors
   - Source: `https://pub.dev/packages/file_selector`
 
+- `html` `0.15.6`
+  - License: MIT
+  - Copyright: package contributors and Google LLC
+  - Source: `https://pub.dev/packages/html`
+
 - `sqlite3` `3.1.7`
   - License: MIT
   - Copyright: Simon Binder
   - Source: `https://pub.dev/packages/sqlite3`
+
+- `xml` `6.6.1`
+  - License: MIT
+  - Copyright: Lukas Renggli
+  - Source: `https://pub.dev/packages/xml`
