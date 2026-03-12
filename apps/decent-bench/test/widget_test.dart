@@ -304,6 +304,80 @@ void main() {
     expect(find.textContaining('SCAN tasks'), findsOneWidget);
   });
 
+  testWidgets('results grid columns resize by dragging the header handle', (
+    tester,
+  ) async {
+    final verticalScrollController = ScrollController();
+    final horizontalScrollController = ScrollController();
+    final tab = QueryTabState.initial(id: 'query-tab-1', title: 'Query 1')
+        .copyWith(
+          lastSql: 'SELECT id, name FROM customers',
+          resultColumns: const <String>['id', 'name'],
+          resultRows: const <Map<String, Object?>>[
+            <String, Object?>{'id': 1, 'name': 'Ada'},
+            <String, Object?>{'id': 2, 'name': 'Lin'},
+          ],
+        );
+
+    _configureDesktopViewport(tester);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      verticalScrollController.dispose();
+      horizontalScrollController.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 1200,
+              height: 600,
+              child: Material(
+                child: ResultsPane(
+                  activeTab: tab,
+                  activeResultsTab: ResultsPaneTab.results,
+                  verticalScrollController: verticalScrollController,
+                  horizontalScrollController: horizontalScrollController,
+                  interactionState: const ResultsGridInteractionState(),
+                  onResultsTabChanged: (_) {},
+                  onLoadNextPage: () {},
+                  onSelectCell: (_, _) {},
+                  onShowCellMenu: (_, _, _) {},
+                  onSelectRow: (_) {},
+                  onTogglePinnedColumn: (_) {},
+                  usePlaceholderContent: false,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final headerFinder = find.byKey(
+      const ValueKey<String>('results.header.name'),
+    );
+    final resizeHandleFinder = find.byKey(
+      const ValueKey<String>('results.resize.name'),
+    );
+
+    final initialWidth = tester.getSize(headerFinder).width;
+    await tester.drag(resizeHandleFinder, const Offset(72, 0));
+    await tester.pump();
+
+    final expandedWidth = tester.getSize(headerFinder).width;
+    expect(expandedWidth, greaterThan(initialWidth));
+
+    await tester.drag(resizeHandleFinder, const Offset(-500, 0));
+    await tester.pump();
+
+    final shrunkWidth = tester.getSize(headerFinder).width;
+    expect(shrunkWidth, lessThan(expandedWidth));
+    expect(shrunkWidth, greaterThanOrEqualTo(96));
+  });
+
   testWidgets(
     'preferences dialog previews theme changes without persisting until save',
     (tester) async {

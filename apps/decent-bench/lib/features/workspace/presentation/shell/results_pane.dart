@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 
 import '../../../../app/theme_system/decent_bench_theme_extension.dart';
 import '../../domain/workspace_models.dart';
@@ -380,8 +381,10 @@ class _ResultsGridState extends State<_ResultsGrid> {
   static const double _rowHeight = 36;
   static const double _rowHeaderWidth = 56;
   static const double _columnWidth = 180;
+  static const double _minColumnWidth = 96;
 
   final ScrollController _pinnedVerticalController = ScrollController();
+  final Map<String, double> _columnWidths = <String, double>{};
   bool _syncingVertical = false;
 
   @override
@@ -389,6 +392,7 @@ class _ResultsGridState extends State<_ResultsGrid> {
     super.initState();
     widget.verticalScrollController.addListener(_syncFromScrollable);
     _pinnedVerticalController.addListener(_syncFromPinned);
+    _pruneColumnWidths();
   }
 
   @override
@@ -398,6 +402,11 @@ class _ResultsGridState extends State<_ResultsGrid> {
       oldWidget.verticalScrollController.removeListener(_syncFromScrollable);
       widget.verticalScrollController.addListener(_syncFromScrollable);
     }
+    if (oldWidget.interactionState.executionGeneration !=
+        widget.interactionState.executionGeneration) {
+      _columnWidths.clear();
+    }
+    _pruneColumnWidths();
   }
 
   @override
@@ -428,7 +437,8 @@ class _ResultsGridState extends State<_ResultsGrid> {
         if (!widget.interactionState.pinnedColumns.contains(column)) column,
     ];
     final pinnedWidth =
-        _rowHeaderWidth + (pinnedColumns.length * _columnWidth).toDouble();
+        _rowHeaderWidth +
+        pinnedColumns.fold<double>(0, (sum, column) => sum + _widthFor(column));
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -438,7 +448,10 @@ class _ResultsGridState extends State<_ResultsGrid> {
         );
         final unpinnedContentWidth = math.max(
           scrollableWidth,
-          remainingColumns.length * _columnWidth,
+          remainingColumns.fold<double>(
+            0,
+            (sum, column) => sum + _widthFor(column),
+          ),
         );
 
         if (columns.isEmpty && rows.isEmpty) {
@@ -468,12 +481,20 @@ class _ResultsGridState extends State<_ResultsGrid> {
                               ),
                               for (final column in pinnedColumns)
                                 _GridCell(
+                                  key: ValueKey<String>(
+                                    'results.header.$column',
+                                  ),
                                   text: column,
                                   isHeader: true,
-                                  width: _columnWidth,
+                                  width: _widthFor(column),
                                   pinned: true,
                                   onPinToggle: () =>
                                       widget.onTogglePinnedColumn(column),
+                                  onResize: (delta) =>
+                                      _resizeColumn(column, delta),
+                                  resizeHandleKey: ValueKey<String>(
+                                    'results.resize.$column',
+                                  ),
                                 ),
                             ],
                           ),
@@ -508,7 +529,7 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                               widget.usePlaceholderContent,
                                         ),
                                       ),
-                                      width: _columnWidth,
+                                      width: _widthFor(column),
                                       pinned: true,
                                       selected: _isCellSelected(index, column),
                                       rowSelected: rowSelected,
@@ -547,12 +568,20 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                   children: <Widget>[
                                     for (final column in remainingColumns)
                                       _GridCell(
+                                        key: ValueKey<String>(
+                                          'results.header.$column',
+                                        ),
                                         text: column,
                                         isHeader: true,
-                                        width: _columnWidth,
+                                        width: _widthFor(column),
                                         pinned: false,
                                         onPinToggle: () =>
                                             widget.onTogglePinnedColumn(column),
+                                        onResize: (delta) =>
+                                            _resizeColumn(column, delta),
+                                        resizeHandleKey: ValueKey<String>(
+                                          'results.resize.$column',
+                                        ),
                                       ),
                                   ],
                                 ),
@@ -581,7 +610,7 @@ class _ResultsGridState extends State<_ResultsGrid> {
                                                     .usePlaceholderContent,
                                               ),
                                             ),
-                                            width: _columnWidth,
+                                            width: _widthFor(column),
                                             selected: _isCellSelected(
                                               index,
                                               column,
@@ -651,6 +680,26 @@ class _ResultsGridState extends State<_ResultsGrid> {
     );
   }
 
+  double _widthFor(String columnName) =>
+      _columnWidths[columnName] ?? _columnWidth;
+
+  void _resizeColumn(String columnName, double delta) {
+    setState(() {
+      _columnWidths[columnName] = math.max(
+        _minColumnWidth,
+        _widthFor(columnName) + delta,
+      );
+    });
+  }
+
+  void _pruneColumnWidths() {
+    final columns = resolveResultsColumns(
+      widget.tab,
+      usePlaceholderContent: widget.usePlaceholderContent,
+    ).toSet();
+    _columnWidths.removeWhere((column, _) => !columns.contains(column));
+  }
+
   void _syncFromScrollable() {
     if (_syncingVertical ||
         !widget.verticalScrollController.hasClients ||
@@ -686,6 +735,7 @@ class _ResultsGridState extends State<_ResultsGrid> {
 
 class _GridCell extends StatelessWidget {
   const _GridCell({
+    super.key,
     required this.text,
     required this.width,
     this.isHeader = false,
@@ -696,6 +746,8 @@ class _GridCell extends StatelessWidget {
     this.onTap,
     this.onSecondaryTapDown,
     this.onPinToggle,
+    this.onResize,
+    this.resizeHandleKey,
   });
 
   final String text;
@@ -708,6 +760,8 @@ class _GridCell extends StatelessWidget {
   final VoidCallback? onTap;
   final ValueChanged<Offset>? onSecondaryTapDown;
   final VoidCallback? onPinToggle;
+  final ValueChanged<double>? onResize;
+  final Key? resizeHandleKey;
 
   @override
   Widget build(BuildContext context) {
@@ -760,6 +814,29 @@ class _GridCell extends StatelessWidget {
                     color: tokens.colors.accent,
                   ),
                 ),
+                if (onResize != null)
+                  MouseRegion(
+                    cursor: SystemMouseCursors.resizeColumn,
+                    child: GestureDetector(
+                      key: resizeHandleKey,
+                      behavior: HitTestBehavior.translucent,
+                      dragStartBehavior: DragStartBehavior.down,
+                      onHorizontalDragUpdate: (details) =>
+                          onResize!(details.delta.dx),
+                      child: Container(
+                        width: 12,
+                        alignment: Alignment.center,
+                        child: Container(
+                          width: 2,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: tokens.resultsGrid.gridLine,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             )
           : Text(
@@ -866,8 +943,14 @@ class _ResultsEmptyState extends StatelessWidget {
       builder: (context, constraints) {
         final horizontalPadding = math.min(24.0, constraints.maxWidth / 10);
         final verticalPadding = math.min(24.0, constraints.maxHeight / 6);
-        final minWidth = math.max(0.0, constraints.maxWidth - (horizontalPadding * 2));
-        final minHeight = math.max(0.0, constraints.maxHeight - (verticalPadding * 2));
+        final minWidth = math.max(
+          0.0,
+          constraints.maxWidth - (horizontalPadding * 2),
+        );
+        final minHeight = math.max(
+          0.0,
+          constraints.maxHeight - (verticalPadding * 2),
+        );
 
         return SingleChildScrollView(
           padding: EdgeInsets.symmetric(
