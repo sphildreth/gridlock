@@ -43,6 +43,13 @@ SqliteImportInspection inspectSqliteSourceFile(String sourcePath) {
           '${draft.sourceName} uses WITHOUT ROWID in SQLite; Decent Bench preserves data and keys but not WITHOUT ROWID storage semantics.',
         );
       }
+      for (final column in draft.columns) {
+        if (column.generatedVirtual) {
+          warnings.add(
+            '${draft.sourceName}.${column.sourceName} is a VIRTUAL generated column in SQLite; Decent Bench imports its current values into a regular DecentDB column because DecentDB supports STORED generated columns.',
+          );
+        }
+      }
     }
 
     return SqliteImportInspection(
@@ -225,6 +232,10 @@ Future<SqliteImportSummary> _runSqliteImport({
         'Target already contains table(s): ${colliding.join(", ")}. Rename them or choose another DecentDB file.',
       );
     }
+    final usedIndexNames = target.schema
+        .listIndexes()
+        .map((index) => index.name)
+        .toSet();
 
     target.begin();
     transactionOpen = true;
@@ -279,12 +290,32 @@ Future<SqliteImportSummary> _runSqliteImport({
     for (final table in orderedTables) {
       _throwIfCancelled(isCancelled);
       for (final index in table.indexes) {
-        final indexName = _normalizeImportedIndexName(index.name);
-        target.execute(
-          'CREATE INDEX ${_quoteDecentIdent(indexName)} ON '
-          '${_quoteDecentIdent(table.targetName)}(${_quoteDecentIdent(_targetColumnName(table, index.column))})',
+        final indexName = _allocateImportedIndexName(
+          index.name,
+          usedIndexNames,
         );
-        indexesCreated.add(indexName);
+        final createIndexSql = _buildCreateIndexSql(
+          table,
+          index,
+          indexName: indexName,
+        );
+        try {
+          target.execute(createIndexSql);
+          indexesCreated.add(indexName);
+          usedIndexNames.add(indexName);
+        } catch (error) {
+          skippedItems.add(
+            SqliteImportSkippedItem(
+              name: index.name,
+              tableName: table.sourceName,
+              reason:
+                  'Index was skipped because DecentDB rejected the translated definition: ${_compactErrorMessage(error)}',
+            ),
+          );
+          warnings.add(
+            'Skipping index ${table.sourceName}.${index.name} because DecentDB rejected the translated definition: ${_compactErrorMessage(error)}',
+          );
+        }
       }
       await Future<void>.delayed(Duration.zero);
     }
@@ -352,20 +383,27 @@ Future<int> _copyTableData({
   required void Function(SqliteImportUpdate update) sendUpdate,
   required bool Function() isCancelled,
 }) async {
-  final sourceColumns = table.columns
-      .map((column) => _quoteSqliteIdent(column.sourceName))
-      .join(', ');
+  final insertedColumns = table.columns
+      .where((column) => !_importsAsGeneratedStored(column))
+      .toList(growable: false);
+  final sourceColumns = insertedColumns.isEmpty
+      ? '1 AS _import_row_marker'
+      : insertedColumns
+            .map((column) => _quoteSqliteIdent(column.sourceName))
+            .join(', ');
   final sourceStatement = source.prepare(
     'SELECT $sourceColumns FROM ${_quoteSqliteIdent(table.sourceName)}',
   );
   final placeholders = <String>[
-    for (var i = 0; i < table.columns.length; i++)
-      _placeholderForType(table.columns[i].targetType, i + 1),
+    for (var i = 0; i < insertedColumns.length; i++)
+      _placeholderForType(insertedColumns[i].targetType, i + 1),
   ];
   final targetStatement = target.prepare(
-    'INSERT INTO ${_quoteDecentIdent(table.targetName)} '
-    '(${table.columns.map((column) => _quoteDecentIdent(column.targetName)).join(", ")}) '
-    'VALUES (${placeholders.join(", ")})',
+    insertedColumns.isEmpty
+        ? 'INSERT INTO ${_quoteDecentIdent(table.targetName)} DEFAULT VALUES'
+        : 'INSERT INTO ${_quoteDecentIdent(table.targetName)} '
+              '(${insertedColumns.map((column) => _quoteDecentIdent(column.targetName)).join(", ")}) '
+              'VALUES (${placeholders.join(", ")})',
   );
 
   var copied = 0;
@@ -375,12 +413,14 @@ Future<int> _copyTableData({
       _throwIfCancelled(isCancelled);
       final row = cursor.current;
       final values = <Object?>[
-        for (final column in table.columns)
+        for (final column in insertedColumns)
           _adaptImportValue(row[column.sourceName], column.targetType),
       ];
       targetStatement.reset();
       targetStatement.clearBindings();
-      targetStatement.bindAll(values);
+      if (insertedColumns.isNotEmpty) {
+        targetStatement.bindAll(values);
+      }
       targetStatement.execute();
       copied++;
 
@@ -466,13 +506,25 @@ SqliteImportTableDraft _inspectTable(
   String tableName,
   String? tableSql,
 ) {
+  final parsedTableSql = _parseTableSqlMetadata(tableSql);
   final columns = <SqliteImportColumnDraft>[];
   final columnIndex = <String, int>{};
-  final columnInfo = database.select(
-    'PRAGMA table_info(${_quoteSqliteIdent(tableName)})',
-  );
+  final skippedItems = <SqliteImportSkippedItem>[];
+  final columnInfo =
+      database
+          .select('PRAGMA table_xinfo(${_quoteSqliteIdent(tableName)})')
+          .toList()
+        ..sort(
+          (left, right) => ((left['cid'] as int?) ?? 0).compareTo(
+            (right['cid'] as int?) ?? 0,
+          ),
+        );
 
   for (final row in columnInfo) {
+    final hidden = (row['hidden'] as int?) ?? 0;
+    if (hidden == 1) {
+      continue;
+    }
     final sourceName = row['name']! as String;
     final declaredType = (row['type'] as String?) ?? '';
     final inferredType = mapSqliteDeclaredTypeToDecentDb(declaredType);
@@ -485,16 +537,48 @@ SqliteImportTableDraft _inspectTable(
       notNull: (row['notnull'] as int?) == 1,
       primaryKey: ((row['pk'] as int?) ?? 0) > 0,
       unique: false,
+      defaultExpr: row['dflt_value'] as String?,
+      generatedExpr: parsedTableSql.generatedExprByColumn[sourceName],
+      generatedStored: hidden == 3,
+      generatedVirtual: hidden == 2,
     );
     columnIndex[sourceName] = columns.length;
     columns.add(column);
   }
 
   final foreignKeys = <SqliteImportForeignKey>[];
+  final foreignKeyGroups = <int, List<sqlite.Row>>{};
   final foreignKeyRows = database.select(
     'PRAGMA foreign_key_list(${_quoteSqliteIdent(tableName)})',
   );
   for (final row in foreignKeyRows) {
+    final id = (row['id'] as int?) ?? 0;
+    foreignKeyGroups.putIfAbsent(id, () => <sqlite.Row>[]).add(row);
+  }
+  final orderedForeignKeyIds = foreignKeyGroups.keys.toList()..sort();
+  for (final id in orderedForeignKeyIds) {
+    final group = foreignKeyGroups[id]!
+      ..sort(
+        (left, right) =>
+            ((left['seq'] as int?) ?? 0).compareTo((right['seq'] as int?) ?? 0),
+      );
+    if (group.length != 1) {
+      final parentTable = group.first['table']! as String;
+      final fromColumns = group.map((row) => row['from']! as String).join(', ');
+      final toColumns = group
+          .map((row) => (row['to'] as String?) ?? '<primary key>')
+          .join(', ');
+      skippedItems.add(
+        SqliteImportSkippedItem(
+          name: 'fk_$id',
+          tableName: tableName,
+          reason:
+              'Composite foreign key ($fromColumns) -> $parentTable($toColumns) is not imported because DecentDB imports currently support single-column foreign keys only.',
+        ),
+      );
+      continue;
+    }
+    final row = group.single;
     final toTable = row['table']! as String;
     foreignKeys.add(
       SqliteImportForeignKey(
@@ -503,15 +587,22 @@ SqliteImportTableDraft _inspectTable(
         toColumn:
             row['to'] as String? ??
             _inferSinglePrimaryKeyColumn(database, toTable),
+        onDelete: _normalizeSqliteForeignKeyAction(row['on_delete']),
+        onUpdate: _normalizeSqliteForeignKeyAction(row['on_update']),
       ),
     );
   }
 
   final indexes = <SqliteImportIndex>[];
-  final skippedItems = <SqliteImportSkippedItem>[];
-  final indexRows = database.select(
-    'PRAGMA index_list(${_quoteSqliteIdent(tableName)})',
-  );
+  final indexRows =
+      database
+          .select('PRAGMA index_list(${_quoteSqliteIdent(tableName)})')
+          .toList()
+        ..sort(
+          (left, right) => ((left['seq'] as int?) ?? 0).compareTo(
+            (right['seq'] as int?) ?? 0,
+          ),
+        );
   for (final row in indexRows) {
     final indexName = row['name']! as String;
     final unique = (row['unique'] as int?) == 1;
@@ -519,29 +610,81 @@ SqliteImportTableDraft _inspectTable(
     if (origin == 'pk') {
       continue;
     }
-    final indexColumns = database.select(
-      'PRAGMA index_info(${_quoteSqliteIdent(indexName)})',
-    );
-    if (indexColumns.length != 1) {
+    final indexInfo =
+        database
+            .select('PRAGMA index_xinfo(${_quoteSqliteIdent(indexName)})')
+            .toList()
+          ..sort(
+            (left, right) => ((left['seqno'] as int?) ?? 0).compareTo(
+              (right['seqno'] as int?) ?? 0,
+            ),
+          );
+    final keyRows = indexInfo
+        .where((item) => (item['key'] as int?) != 0)
+        .toList(growable: false);
+    if (_indexHasDescendingKey(keyRows)) {
       skippedItems.add(
         SqliteImportSkippedItem(
           name: indexName,
           tableName: tableName,
-          reason: unique
-              ? 'Composite UNIQUE constraints are not imported in Phase 4.'
-              : 'Composite indexes are not imported in Phase 4.',
+          reason:
+              'Descending SQLite indexes are not imported because DecentDB does not preserve descending index keys.',
         ),
       );
       continue;
     }
-    final columnName = indexColumns.first['name']! as String;
-    if (unique && columnIndex.containsKey(columnName)) {
-      final idx = columnIndex[columnName]!;
+    if (_indexHasCustomCollation(keyRows)) {
+      skippedItems.add(
+        SqliteImportSkippedItem(
+          name: indexName,
+          tableName: tableName,
+          reason:
+              'SQLite indexes that depend on custom collations are not imported because DecentDB does not preserve SQLite collation metadata.',
+        ),
+      );
+      continue;
+    }
+    final parsedIndexSql = _parseIndexSql(
+      _lookupSqliteMasterObjectSql(database, type: 'index', name: indexName),
+    );
+    final elements =
+        (parsedIndexSql?.elements ?? _extractPlainIndexElements(keyRows))
+            .map((element) => element.trim())
+            .where((element) => element.isNotEmpty)
+            .toList(growable: false);
+    if (elements.isEmpty) {
+      skippedItems.add(
+        SqliteImportSkippedItem(
+          name: indexName,
+          tableName: tableName,
+          reason:
+              'SQLite index definition could not be translated into DecentDB SQL.',
+        ),
+      );
+      continue;
+    }
+    final whereSql = parsedIndexSql?.whereSql;
+    final singleColumnConstraint =
+        unique &&
+        origin == 'u' &&
+        (whereSql == null || whereSql.trim().isEmpty) &&
+        elements.length == 1;
+    final constrainedColumn = singleColumnConstraint
+        ? _findSourceColumnForIndexElement(columns, elements.single)
+        : null;
+    if (constrainedColumn != null &&
+        columnIndex.containsKey(constrainedColumn)) {
+      final idx = columnIndex[constrainedColumn]!;
       columns[idx] = columns[idx].copyWith(unique: true);
       continue;
     }
     indexes.add(
-      SqliteImportIndex(name: indexName, column: columnName, unique: unique),
+      SqliteImportIndex(
+        name: indexName,
+        elements: elements,
+        unique: unique,
+        whereSql: whereSql,
+      ),
     );
   }
 
@@ -550,16 +693,16 @@ SqliteImportTableDraft _inspectTable(
   );
   final rowCount = rowCountResult.first['row_count']! as int;
 
-  final upperSql = (tableSql ?? '').toUpperCase();
   return SqliteImportTableDraft(
     sourceName: tableName,
     targetName: tableName,
     selected: true,
     rowCount: rowCount,
-    strict: upperSql.contains('STRICT'),
-    withoutRowId: upperSql.contains('WITHOUT ROWID'),
+    strict: _tableSqlHasOption(tableSql, 'STRICT'),
+    withoutRowId: _tableSqlHasOption(tableSql, 'WITHOUT ROWID'),
     columns: columns,
     foreignKeys: foreignKeys,
+    checks: parsedTableSql.checks,
     indexes: indexes,
     skippedItems: skippedItems,
     previewRows: const <Map<String, Object?>>[],
@@ -649,9 +792,20 @@ String _buildCreateTableSql(
       .where((column) => column.primaryKey)
       .toList();
   final hasCompositePrimaryKey = primaryKeyColumns.length > 1;
+  final sourceToTargetColumns = _sourceToTargetColumnMap(table);
 
   final definitions = <String>[];
   for (final column in table.columns) {
+    final importsAsGeneratedStored = _importsAsGeneratedStored(column);
+    if (column.generatedVirtual) {
+      warnings.add(
+        'Importing ${table.sourceName}.${column.sourceName} as a regular DecentDB column because SQLite VIRTUAL generated columns are not supported by DecentDB.',
+      );
+    } else if (column.generatedStored && !importsAsGeneratedStored) {
+      warnings.add(
+        'Importing ${table.sourceName}.${column.sourceName} as a regular DecentDB column because its generated expression could not be reconstructed from the SQLite schema.',
+      );
+    }
     final parts = <String>[
       _quoteDecentIdent(column.targetName),
       column.targetType,
@@ -666,6 +820,14 @@ String _buildCreateTableSql(
       if (column.unique) {
         parts.add('UNIQUE');
       }
+    }
+    if (column.hasDefault) {
+      parts.add('DEFAULT ${column.defaultExpr}');
+    }
+    if (importsAsGeneratedStored) {
+      parts.add(
+        'GENERATED ALWAYS AS (${_rewriteSqlIdentifiers(column.generatedExpr!, sourceToTargetColumns, sourceTableName: table.sourceName, targetTableName: table.targetName)}) STORED',
+      );
     }
 
     final foreignKey = foreignKeyByColumn[column.sourceName];
@@ -682,6 +844,12 @@ String _buildCreateTableSql(
           'REFERENCES ${_quoteDecentIdent(targetTable.targetName)}'
           '(${_quoteDecentIdent(targetColumn)})',
         );
+        if (_shouldEmitForeignKeyAction(foreignKey.onDelete)) {
+          parts.add('ON DELETE ${foreignKey.onDelete!.trim()}');
+        }
+        if (_shouldEmitForeignKeyAction(foreignKey.onUpdate)) {
+          parts.add('ON UPDATE ${foreignKey.onUpdate!.trim()}');
+        }
       } else {
         skippedItems.add(
           SqliteImportSkippedItem(
@@ -717,8 +885,63 @@ String _buildCreateTableSql(
       'PRIMARY KEY (${primaryKeyColumns.map((column) => _quoteDecentIdent(column.targetName)).join(", ")})',
     );
   }
+  for (final check in table.checks) {
+    final exprSql = _rewriteSqlIdentifiers(
+      check.exprSql,
+      sourceToTargetColumns,
+      sourceTableName: table.sourceName,
+      targetTableName: table.targetName,
+    );
+    final name = check.name?.trim();
+    definitions.add(
+      name == null || name.isEmpty
+          ? 'CHECK ($exprSql)'
+          : 'CONSTRAINT ${_quoteDecentIdent(name)} CHECK ($exprSql)',
+    );
+  }
 
   return 'CREATE TABLE ${_quoteDecentIdent(table.targetName)} (${definitions.join(", ")})';
+}
+
+String _buildCreateIndexSql(
+  SqliteImportTableDraft table,
+  SqliteImportIndex index, {
+  required String indexName,
+}) {
+  final elementsSql = index.resolvedElements
+      .map((element) => _translateIndexElementSql(table, element))
+      .join(', ');
+  final buffer = StringBuffer(
+    index.unique ? 'CREATE UNIQUE INDEX ' : 'CREATE INDEX ',
+  );
+  buffer.write(_quoteDecentIdent(indexName));
+  buffer.write(' ON ${_quoteDecentIdent(table.targetName)} ($elementsSql)');
+  final whereSql = index.whereSql?.trim();
+  if (whereSql != null && whereSql.isNotEmpty) {
+    buffer.write(
+      ' WHERE ${_rewriteSqlIdentifiers(whereSql, _sourceToTargetColumnMap(table), sourceTableName: table.sourceName, targetTableName: table.targetName)}',
+    );
+  }
+  return buffer.toString();
+}
+
+String _translateIndexElementSql(
+  SqliteImportTableDraft table,
+  String elementSql,
+) {
+  final sourceColumn = _findSourceColumnForIndexElement(
+    table.columns,
+    elementSql,
+  );
+  if (sourceColumn != null) {
+    return _quoteDecentIdent(_targetColumnName(table, sourceColumn));
+  }
+  return _rewriteSqlIdentifiers(
+    elementSql,
+    _sourceToTargetColumnMap(table),
+    sourceTableName: table.sourceName,
+    targetTableName: table.targetName,
+  );
 }
 
 String _targetColumnName(
@@ -738,7 +961,7 @@ String? _inferSinglePrimaryKeyColumn(
   String tableName,
 ) {
   final tableInfo = database.select(
-    'PRAGMA table_info(${_quoteSqliteIdent(tableName)})',
+    'PRAGMA table_xinfo(${_quoteSqliteIdent(tableName)})',
   );
   final primaryKeyColumns = <String>[
     for (final row in tableInfo)
@@ -773,6 +996,694 @@ String? _resolveForeignKeyTargetColumn(
     return primaryKeyColumns.single.targetName;
   }
   return null;
+}
+
+bool _importsAsGeneratedStored(SqliteImportColumnDraft column) {
+  return column.generatedStored &&
+      column.generatedExpr != null &&
+      column.generatedExpr!.trim().isNotEmpty;
+}
+
+Map<String, String> _sourceToTargetColumnMap(SqliteImportTableDraft table) {
+  return <String, String>{
+    for (final column in table.columns) column.sourceName: column.targetName,
+  };
+}
+
+String? _normalizeSqliteForeignKeyAction(Object? value) {
+  final action = (value as String?)?.trim();
+  if (action == null || action.isEmpty) {
+    return null;
+  }
+  final normalized = action.toUpperCase();
+  return normalized == 'NO ACTION' ? null : normalized;
+}
+
+bool _shouldEmitForeignKeyAction(String? value) {
+  return value != null && value.trim().isNotEmpty;
+}
+
+bool _indexHasDescendingKey(List<sqlite.Row> rows) {
+  for (final row in rows) {
+    if ((row['desc'] as int?) == 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _indexHasCustomCollation(List<sqlite.Row> rows) {
+  for (final row in rows) {
+    final collation = (row['coll'] as String?)?.trim();
+    if (collation != null &&
+        collation.isNotEmpty &&
+        collation.toUpperCase() != 'BINARY') {
+      return true;
+    }
+  }
+  return false;
+}
+
+List<String> _extractPlainIndexElements(List<sqlite.Row> rows) {
+  final elements = <String>[];
+  for (final row in rows) {
+    final name = row['name'] as String?;
+    final cid = row['cid'] as int?;
+    if (name == null || name.trim().isEmpty || cid == null || cid < 0) {
+      return const <String>[];
+    }
+    elements.add(name);
+  }
+  return elements;
+}
+
+String? _findSourceColumnForIndexElement(
+  List<SqliteImportColumnDraft> columns,
+  String elementSql,
+) {
+  for (final column in columns) {
+    if (_sqlIdentifierMatches(elementSql, column.sourceName)) {
+      return column.sourceName;
+    }
+  }
+  return null;
+}
+
+String _allocateImportedIndexName(String sourceName, Set<String> usedNames) {
+  final baseName = sourceName.trim().isEmpty
+      ? 'imported_index'
+      : sourceName.trim();
+  if (!usedNames.contains(baseName)) {
+    return baseName;
+  }
+  var suffix = 2;
+  while (usedNames.contains('${baseName}_$suffix')) {
+    suffix++;
+  }
+  return '${baseName}_$suffix';
+}
+
+String _compactErrorMessage(Object error) {
+  final raw = error is BridgeFailure ? error.message : error.toString();
+  return raw.replaceFirst(RegExp(r'^[A-Za-z_]+Exception:\s*'), '').trim();
+}
+
+_ParsedTableSqlMetadata _parseTableSqlMetadata(String? tableSql) {
+  final body = _extractCreateTableBody(tableSql);
+  if (body == null || body.trim().isEmpty) {
+    return const _ParsedTableSqlMetadata();
+  }
+  final generatedExprByColumn = <String, String>{};
+  final checks = <SqliteImportCheckConstraint>[];
+  for (final definition in _splitTopLevelCommaSeparated(body)) {
+    final trimmed = definition.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    if (_isTableConstraintDefinition(trimmed)) {
+      final check = _parseStandaloneCheckConstraint(trimmed);
+      if (check != null) {
+        checks.add(check);
+      }
+      continue;
+    }
+    final identifier = _readSqlIdentifier(trimmed, 0);
+    if (identifier == null) {
+      continue;
+    }
+    final generatedExpr = _extractGeneratedExpression(trimmed);
+    if (generatedExpr != null && generatedExpr.trim().isNotEmpty) {
+      generatedExprByColumn[identifier.value] = generatedExpr.trim();
+    }
+    checks.addAll(_extractInlineCheckConstraints(trimmed));
+  }
+  return _ParsedTableSqlMetadata(
+    generatedExprByColumn: generatedExprByColumn,
+    checks: checks,
+  );
+}
+
+_ParsedIndexSql? _parseIndexSql(String? indexSql) {
+  if (indexSql == null || indexSql.trim().isEmpty) {
+    return null;
+  }
+  final openParen = _findFirstUnquotedChar(indexSql, '(');
+  if (openParen < 0) {
+    return null;
+  }
+  final closeParen = _findMatchingParen(indexSql, openParen);
+  if (closeParen < 0) {
+    return null;
+  }
+  final elements = _splitTopLevelCommaSeparated(
+    indexSql.substring(openParen + 1, closeParen),
+  );
+  final trailing = indexSql.substring(closeParen + 1).trim();
+  String? whereSql;
+  if (_startsWithKeyword(trailing, 'WHERE')) {
+    whereSql = trailing.substring(5).trim();
+  }
+  return _ParsedIndexSql(elements: elements, whereSql: whereSql);
+}
+
+String? _lookupSqliteMasterObjectSql(
+  sqlite.Database database, {
+  required String type,
+  required String name,
+}) {
+  final rows = database.select(
+    'SELECT sql FROM sqlite_master '
+    'WHERE type = ${_quoteSqliteStringLiteral(type)} '
+    'AND name = ${_quoteSqliteStringLiteral(name)} '
+    'LIMIT 1',
+  );
+  if (rows.isEmpty) {
+    return null;
+  }
+  return rows.first['sql'] as String?;
+}
+
+String? _extractCreateTableBody(String? tableSql) {
+  if (tableSql == null || tableSql.trim().isEmpty) {
+    return null;
+  }
+  final openParen = _findFirstUnquotedChar(tableSql, '(');
+  if (openParen < 0) {
+    return null;
+  }
+  final closeParen = _findMatchingParen(tableSql, openParen);
+  if (closeParen < 0) {
+    return null;
+  }
+  return tableSql.substring(openParen + 1, closeParen);
+}
+
+bool _tableSqlHasOption(String? tableSql, String option) {
+  if (tableSql == null || tableSql.trim().isEmpty) {
+    return false;
+  }
+  final openParen = _findFirstUnquotedChar(tableSql, '(');
+  if (openParen < 0) {
+    return false;
+  }
+  final closeParen = _findMatchingParen(tableSql, openParen);
+  if (closeParen < 0) {
+    return false;
+  }
+  final trailing = tableSql.substring(closeParen + 1);
+  return RegExp(RegExp.escape(option), caseSensitive: false).hasMatch(trailing);
+}
+
+bool _isTableConstraintDefinition(String definition) {
+  final trimmed = definition.trimLeft();
+  if (_startsWithKeyword(trimmed, 'PRIMARY KEY') ||
+      _startsWithKeyword(trimmed, 'UNIQUE') ||
+      _startsWithKeyword(trimmed, 'CHECK') ||
+      _startsWithKeyword(trimmed, 'FOREIGN KEY')) {
+    return true;
+  }
+  if (!_startsWithKeyword(trimmed, 'CONSTRAINT')) {
+    return false;
+  }
+  final name = _readSqlIdentifier(trimmed, 'CONSTRAINT'.length);
+  if (name == null) {
+    return false;
+  }
+  final remainder = trimmed.substring(name.nextIndex).trimLeft();
+  return _startsWithKeyword(remainder, 'PRIMARY KEY') ||
+      _startsWithKeyword(remainder, 'UNIQUE') ||
+      _startsWithKeyword(remainder, 'CHECK') ||
+      _startsWithKeyword(remainder, 'FOREIGN KEY');
+}
+
+SqliteImportCheckConstraint? _parseStandaloneCheckConstraint(
+  String definition,
+) {
+  var working = definition.trim();
+  String? name;
+  if (_startsWithKeyword(working, 'CONSTRAINT')) {
+    final parsedName = _readSqlIdentifier(working, 'CONSTRAINT'.length);
+    if (parsedName == null) {
+      return null;
+    }
+    name = parsedName.value;
+    working = working.substring(parsedName.nextIndex).trimLeft();
+  }
+  if (!_startsWithKeyword(working, 'CHECK')) {
+    return null;
+  }
+  final exprSql = _extractParenthesizedExpressionAfterKeyword(
+    working,
+    working.indexOf(RegExp('CHECK', caseSensitive: false)),
+    'CHECK'.length,
+  );
+  if (exprSql == null) {
+    return null;
+  }
+  return SqliteImportCheckConstraint(exprSql: exprSql, name: name);
+}
+
+List<SqliteImportCheckConstraint> _extractInlineCheckConstraints(
+  String definition,
+) {
+  final constraints = <SqliteImportCheckConstraint>[];
+  var searchFrom = 0;
+  while (true) {
+    final checkIndex = _findTopLevelKeyword(
+      definition,
+      'CHECK',
+      start: searchFrom,
+    );
+    if (checkIndex < 0) {
+      return constraints;
+    }
+    final exprSql = _extractParenthesizedExpressionAfterKeyword(
+      definition,
+      checkIndex,
+      'CHECK'.length,
+    );
+    if (exprSql == null) {
+      return constraints;
+    }
+    constraints.add(
+      SqliteImportCheckConstraint(
+        exprSql: exprSql,
+        name: _extractConstraintNameBefore(definition, checkIndex),
+      ),
+    );
+    final openParen = _skipSqlWhitespace(
+      definition,
+      checkIndex + 'CHECK'.length,
+    );
+    final closeParen =
+        openParen < definition.length && definition[openParen] == '('
+        ? _findMatchingParen(definition, openParen)
+        : -1;
+    searchFrom = closeParen < 0 ? definition.length : closeParen + 1;
+  }
+}
+
+String? _extractGeneratedExpression(String definition) {
+  final generatedIndex = _findTopLevelKeyword(definition, 'GENERATED');
+  if (generatedIndex < 0) {
+    return null;
+  }
+  final asIndex = _findTopLevelKeyword(
+    definition,
+    'AS',
+    start: generatedIndex + 'GENERATED'.length,
+  );
+  if (asIndex < 0) {
+    return null;
+  }
+  return _extractParenthesizedExpressionAfterKeyword(
+    definition,
+    asIndex,
+    'AS'.length,
+  );
+}
+
+String? _extractConstraintNameBefore(String definition, int keywordIndex) {
+  final prefix = definition.substring(0, keywordIndex).trimRight();
+  final constraintIndex = _lastTopLevelKeyword(prefix, 'CONSTRAINT');
+  if (constraintIndex < 0) {
+    return null;
+  }
+  final between = prefix
+      .substring(constraintIndex + 'CONSTRAINT'.length)
+      .trim();
+  final parsed = _readSqlIdentifier(between, 0);
+  if (parsed == null) {
+    return null;
+  }
+  if (between.substring(parsed.nextIndex).trim().isNotEmpty) {
+    return null;
+  }
+  return parsed.value;
+}
+
+String _rewriteSqlIdentifiers(
+  String sql,
+  Map<String, String> identifierMap, {
+  required String sourceTableName,
+  required String targetTableName,
+}) {
+  final loweredMap = <String, String>{
+    for (final entry in identifierMap.entries)
+      entry.key.toLowerCase(): entry.value,
+  };
+  final buffer = StringBuffer();
+  var index = 0;
+  while (index < sql.length) {
+    final char = sql[index];
+    if (char == "'") {
+      final next = _skipSingleQuotedString(sql, index);
+      buffer.write(sql.substring(index, next));
+      index = next;
+      continue;
+    }
+    if (char == '"' ||
+        char == '`' ||
+        char == '[' ||
+        _isIdentifierStartChar(char)) {
+      final identifier = _readSqlIdentifier(sql, index);
+      if (identifier != null) {
+        final nextNonWhitespace = _nextNonWhitespaceIndex(
+          sql,
+          identifier.nextIndex,
+        );
+        final replacement =
+            nextNonWhitespace < sql.length &&
+                sql[nextNonWhitespace] == '.' &&
+                _equalsIgnoreCase(identifier.value, sourceTableName)
+            ? targetTableName
+            : loweredMap[identifier.value.toLowerCase()];
+        if (replacement != null) {
+          buffer.write(_quoteDecentIdent(replacement));
+        } else {
+          buffer.write(sql.substring(index, identifier.nextIndex));
+        }
+        index = identifier.nextIndex;
+        continue;
+      }
+    }
+    buffer.write(char);
+    index++;
+  }
+  return buffer.toString();
+}
+
+bool _sqlIdentifierMatches(String sqlIdentifier, String expected) {
+  final parsed = _readSqlIdentifier(sqlIdentifier.trim(), 0);
+  if (parsed == null) {
+    return false;
+  }
+  return parsed.nextIndex == sqlIdentifier.trim().length &&
+      _equalsIgnoreCase(parsed.value, expected);
+}
+
+List<String> _splitTopLevelCommaSeparated(String sql) {
+  final parts = <String>[];
+  var start = 0;
+  var depth = 0;
+  var index = 0;
+  while (index < sql.length) {
+    final char = sql[index];
+    if (char == "'") {
+      index = _skipSingleQuotedString(sql, index);
+      continue;
+    }
+    if (char == '"' || char == '`') {
+      index = _skipQuotedIdentifier(sql, index, char);
+      continue;
+    }
+    if (char == '[') {
+      index = _skipBracketIdentifier(sql, index);
+      continue;
+    }
+    if (char == '(') {
+      depth++;
+      index++;
+      continue;
+    }
+    if (char == ')') {
+      if (depth > 0) {
+        depth--;
+      }
+      index++;
+      continue;
+    }
+    if (char == ',' && depth == 0) {
+      parts.add(sql.substring(start, index).trim());
+      start = index + 1;
+    }
+    index++;
+  }
+  parts.add(sql.substring(start).trim());
+  return parts.where((part) => part.isNotEmpty).toList(growable: false);
+}
+
+String? _extractParenthesizedExpressionAfterKeyword(
+  String sql,
+  int keywordIndex,
+  int keywordLength,
+) {
+  final openParen = _skipSqlWhitespace(sql, keywordIndex + keywordLength);
+  if (openParen >= sql.length || sql[openParen] != '(') {
+    return null;
+  }
+  final closeParen = _findMatchingParen(sql, openParen);
+  if (closeParen < 0) {
+    return null;
+  }
+  return sql.substring(openParen + 1, closeParen).trim();
+}
+
+int _findTopLevelKeyword(String sql, String keyword, {int start = 0}) {
+  var depth = 0;
+  var index = start;
+  while (index <= sql.length - keyword.length) {
+    final char = sql[index];
+    if (char == "'") {
+      index = _skipSingleQuotedString(sql, index);
+      continue;
+    }
+    if (char == '"' || char == '`') {
+      index = _skipQuotedIdentifier(sql, index, char);
+      continue;
+    }
+    if (char == '[') {
+      index = _skipBracketIdentifier(sql, index);
+      continue;
+    }
+    if (char == '(') {
+      depth++;
+      index++;
+      continue;
+    }
+    if (char == ')') {
+      if (depth > 0) {
+        depth--;
+      }
+      index++;
+      continue;
+    }
+    if (depth == 0 && _matchesKeywordAt(sql, keyword, index)) {
+      return index;
+    }
+    index++;
+  }
+  return -1;
+}
+
+int _lastTopLevelKeyword(String sql, String keyword) {
+  var lastIndex = -1;
+  var searchFrom = 0;
+  while (true) {
+    final next = _findTopLevelKeyword(sql, keyword, start: searchFrom);
+    if (next < 0) {
+      return lastIndex;
+    }
+    lastIndex = next;
+    searchFrom = next + keyword.length;
+  }
+}
+
+bool _startsWithKeyword(String sql, String keyword) {
+  final trimmed = sql.trimLeft();
+  return _matchesKeywordAt(trimmed, keyword, 0);
+}
+
+bool _matchesKeywordAt(String sql, String keyword, int index) {
+  if (index < 0 || index + keyword.length > sql.length) {
+    return false;
+  }
+  if (!sql
+      .substring(index, index + keyword.length)
+      .toUpperCase()
+      .startsWith(keyword.toUpperCase())) {
+    return false;
+  }
+  final before = index == 0 ? null : sql[index - 1];
+  final after = index + keyword.length >= sql.length
+      ? null
+      : sql[index + keyword.length];
+  return !_isIdentifierChar(before) && !_isIdentifierChar(after);
+}
+
+({String value, int nextIndex})? _readSqlIdentifier(String sql, int start) {
+  final index = _skipSqlWhitespace(sql, start);
+  if (index >= sql.length) {
+    return null;
+  }
+  final char = sql[index];
+  if (char == '"') {
+    final next = _skipQuotedIdentifier(sql, index, '"');
+    return (
+      value: sql.substring(index + 1, next - 1).replaceAll('""', '"'),
+      nextIndex: next,
+    );
+  }
+  if (char == '`') {
+    final next = _skipQuotedIdentifier(sql, index, '`');
+    return (
+      value: sql.substring(index + 1, next - 1).replaceAll('``', '`'),
+      nextIndex: next,
+    );
+  }
+  if (char == '[') {
+    final next = _skipBracketIdentifier(sql, index);
+    return (value: sql.substring(index + 1, next - 1), nextIndex: next);
+  }
+  if (!_isIdentifierStartChar(char)) {
+    return null;
+  }
+  var next = index + 1;
+  while (next < sql.length && _isIdentifierChar(sql[next])) {
+    next++;
+  }
+  return (value: sql.substring(index, next), nextIndex: next);
+}
+
+int _skipSqlWhitespace(String sql, int start) {
+  var index = start;
+  while (index < sql.length && _isWhitespace(sql[index])) {
+    index++;
+  }
+  return index;
+}
+
+int _findFirstUnquotedChar(String sql, String char) {
+  var index = 0;
+  while (index < sql.length) {
+    final current = sql[index];
+    if (current == "'") {
+      index = _skipSingleQuotedString(sql, index);
+      continue;
+    }
+    if (current == '"' || current == '`') {
+      index = _skipQuotedIdentifier(sql, index, current);
+      continue;
+    }
+    if (current == '[') {
+      index = _skipBracketIdentifier(sql, index);
+      continue;
+    }
+    if (current == char) {
+      return index;
+    }
+    index++;
+  }
+  return -1;
+}
+
+int _findMatchingParen(String sql, int openParenIndex) {
+  var depth = 0;
+  var index = openParenIndex;
+  while (index < sql.length) {
+    final char = sql[index];
+    if (char == "'") {
+      index = _skipSingleQuotedString(sql, index);
+      continue;
+    }
+    if (char == '"' || char == '`') {
+      index = _skipQuotedIdentifier(sql, index, char);
+      continue;
+    }
+    if (char == '[') {
+      index = _skipBracketIdentifier(sql, index);
+      continue;
+    }
+    if (char == '(') {
+      depth++;
+    } else if (char == ')') {
+      depth--;
+      if (depth == 0) {
+        return index;
+      }
+    }
+    index++;
+  }
+  return -1;
+}
+
+int _skipSingleQuotedString(String sql, int start) {
+  var index = start + 1;
+  while (index < sql.length) {
+    if (sql[index] == "'") {
+      if (index + 1 < sql.length && sql[index + 1] == "'") {
+        index += 2;
+        continue;
+      }
+      return index + 1;
+    }
+    index++;
+  }
+  return sql.length;
+}
+
+int _skipQuotedIdentifier(String sql, int start, String quote) {
+  var index = start + 1;
+  while (index < sql.length) {
+    if (sql[index] == quote) {
+      if (index + 1 < sql.length && sql[index + 1] == quote) {
+        index += 2;
+        continue;
+      }
+      return index + 1;
+    }
+    index++;
+  }
+  return sql.length;
+}
+
+int _skipBracketIdentifier(String sql, int start) {
+  var index = start + 1;
+  while (index < sql.length) {
+    if (sql[index] == ']') {
+      return index + 1;
+    }
+    index++;
+  }
+  return sql.length;
+}
+
+int _nextNonWhitespaceIndex(String sql, int start) {
+  var index = start;
+  while (index < sql.length && _isWhitespace(sql[index])) {
+    index++;
+  }
+  return index;
+}
+
+bool _isIdentifierStartChar(String value) {
+  if (value.isEmpty) {
+    return false;
+  }
+  final codeUnit = value.codeUnitAt(0);
+  return (codeUnit >= 65 && codeUnit <= 90) ||
+      (codeUnit >= 97 && codeUnit <= 122) ||
+      value == '_';
+}
+
+bool _isIdentifierChar(String? value) {
+  if (value == null || value.isEmpty) {
+    return false;
+  }
+  final codeUnit = value.codeUnitAt(0);
+  return (codeUnit >= 65 && codeUnit <= 90) ||
+      (codeUnit >= 97 && codeUnit <= 122) ||
+      (codeUnit >= 48 && codeUnit <= 57) ||
+      value == '_' ||
+      value == r'$';
+}
+
+bool _isWhitespace(String value) {
+  return value == ' ' || value == '\n' || value == '\r' || value == '\t';
+}
+
+bool _equalsIgnoreCase(String left, String right) {
+  return left.toLowerCase() == right.toLowerCase();
 }
 
 String _placeholderForType(String targetType, int index) {
@@ -816,6 +1727,9 @@ Object? _adaptImportValue(Object? value, String targetType) {
   }
   if (targetType == 'TIMESTAMP' && value is DateTime) {
     return value.toUtc();
+  }
+  if (_isDecimalType(targetType) && value is num) {
+    return value.toString();
   }
   return value;
 }
@@ -865,15 +1779,12 @@ String mapSqliteDeclaredTypeToDecentDb(String declaredType) {
   return 'TEXT';
 }
 
-String _normalizeImportedIndexName(String sourceName) {
-  return sourceName.trim().toLowerCase().replaceAll(
-    RegExp(r'[^a-z0-9_]+'),
-    '_',
-  );
-}
-
 String _quoteSqliteIdent(String value) {
   return '"${value.replaceAll('"', '""')}"';
+}
+
+String _quoteSqliteStringLiteral(String value) {
+  return "'${value.replaceAll("'", "''")}'";
 }
 
 String _quoteDecentIdent(String value) {
@@ -886,6 +1797,23 @@ bool _isDecimalType(String targetType) {
 
 bool _isUuidType(String targetType) {
   return targetType == 'UUID';
+}
+
+class _ParsedTableSqlMetadata {
+  const _ParsedTableSqlMetadata({
+    this.generatedExprByColumn = const <String, String>{},
+    this.checks = const <SqliteImportCheckConstraint>[],
+  });
+
+  final Map<String, String> generatedExprByColumn;
+  final List<SqliteImportCheckConstraint> checks;
+}
+
+class _ParsedIndexSql {
+  const _ParsedIndexSql({required this.elements, this.whereSql});
+
+  final List<String> elements;
+  final String? whereSql;
 }
 
 class _SqliteImportCancelled implements Exception {

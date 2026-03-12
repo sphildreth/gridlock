@@ -186,6 +186,57 @@ CREATE TABLE playlists (
       return sourcePath;
     }
 
+    String createSqliteAdvancedSchemaSource(String filename) {
+      final sourcePath = p.join(tempDir.path, filename);
+      final source = sqlite.sqlite3.open(sourcePath);
+      try {
+        source.execute('PRAGMA foreign_keys = ON;');
+        source.execute('''
+CREATE TABLE parent (
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  status TEXT DEFAULT 'active',
+  amount NUMERIC(10,2) NOT NULL CONSTRAINT amount_nonneg CHECK (amount >= 0),
+  doubled NUMERIC GENERATED ALWAYS AS (amount * 2) STORED,
+  CONSTRAINT status_valid CHECK (status IN ('active', 'inactive'))
+)
+''');
+        source.execute('''
+CREATE TABLE child (
+  id INTEGER PRIMARY KEY,
+  parent_id INTEGER REFERENCES parent(id) ON DELETE CASCADE ON UPDATE RESTRICT,
+  code_ref TEXT REFERENCES parent(code) ON DELETE CASCADE ON UPDATE CASCADE,
+  value INTEGER DEFAULT 5 CHECK (value > 0),
+  CONSTRAINT child_positive CHECK (id > 0)
+)
+''');
+        source.execute(
+          'CREATE UNIQUE INDEX child_parent_code_uq ON child (parent_id, code_ref)',
+        );
+        source.execute(
+          'CREATE INDEX child_parent_partial ON child (parent_id) WHERE parent_id IS NOT NULL',
+        );
+        source.execute(
+          'CREATE INDEX child_code_lower_idx ON child ((LOWER(code_ref)))',
+        );
+        source.execute(
+          "INSERT INTO parent (id, code, amount) VALUES (1, 'ADA-001', 10.5)",
+        );
+        source.execute(
+          "INSERT INTO parent (id, code, status, amount) VALUES (2, 'GRACE-002', 'inactive', 20.0)",
+        );
+        source.execute(
+          "INSERT INTO child (id, parent_id, code_ref, value) VALUES (1, 1, 'ADA-001', 7)",
+        );
+        source.execute(
+          "INSERT INTO child (id, parent_id, code_ref) VALUES (2, 2, 'GRACE-002')",
+        );
+      } finally {
+        source.close();
+      }
+      return sourcePath;
+    }
+
     String createExcelSource(String filename) {
       final sourcePath = p.join(tempDir.path, filename);
       final workbook = xls.Excel.createExcel();
@@ -965,6 +1016,220 @@ JOIN users AS u ON u.id = p.owner_id
 ''');
         expect(rows.single['name'], 'Favorites');
         expect(rows.single['owner_name'], 'Ada');
+      },
+    );
+
+    test(
+      'imports advanced SQLite schema features without phase-4 skips',
+      skip: skipReason,
+      () async {
+        final sourcePath = createSqliteAdvancedSchemaSource(
+          'phase4-advanced.sqlite',
+        );
+        final inspection = await bridge.inspectSqliteSource(
+          sourcePath: sourcePath,
+        );
+        final parentDraft = inspection.tables.firstWhere(
+          (table) => table.sourceName == 'parent',
+        );
+        final childDraft = inspection.tables.firstWhere(
+          (table) => table.sourceName == 'child',
+        );
+        final statusColumn = parentDraft.columns.firstWhere(
+          (column) => column.sourceName == 'status',
+        );
+        final doubledColumn = parentDraft.columns.firstWhere(
+          (column) => column.sourceName == 'doubled',
+        );
+
+        expect(
+          inspection.tables.expand((table) => table.skippedItems),
+          everyElement(
+            isA<SqliteImportSkippedItem>().having(
+              (item) => item.reason,
+              'reason',
+              isNot(contains('Phase 4')),
+            ),
+          ),
+        );
+        expect(statusColumn.defaultExpr, contains('active'));
+        expect(doubledColumn.generatedStored, isTrue);
+        expect(
+          doubledColumn.generatedExpr!.replaceAll(' ', ''),
+          contains('amount*2'),
+        );
+        expect(parentDraft.checks, hasLength(2));
+        expect(childDraft.checks, hasLength(2));
+        expect(
+          childDraft.indexes.map((index) => index.name),
+          containsAll(<String>[
+            'child_parent_code_uq',
+            'child_parent_partial',
+            'child_code_lower_idx',
+          ]),
+        );
+        expect(
+          childDraft.indexes
+              .firstWhere((index) => index.name == 'child_parent_code_uq')
+              .resolvedElements,
+          orderedEquals(<String>['parent_id', 'code_ref']),
+        );
+        expect(
+          childDraft.indexes
+              .firstWhere((index) => index.name == 'child_parent_partial')
+              .whereSql,
+          contains('parent_id'),
+        );
+        expect(
+          childDraft.indexes
+              .firstWhere((index) => index.name == 'child_code_lower_idx')
+              .resolvedElements
+              .single
+              .toUpperCase(),
+          contains('LOWER'),
+        );
+
+        final targetPath = p.join(tempDir.path, 'phase4-advanced.ddb');
+        final request = SqliteImportRequest(
+          jobId: 'advanced-sqlite-import',
+          sourcePath: sourcePath,
+          targetPath: targetPath,
+          importIntoExistingTarget: false,
+          replaceExistingTarget: true,
+          tables: inspection.tables.map((table) {
+            if (table.sourceName == 'parent') {
+              return table.copyWith(
+                targetName: 'customer_accounts',
+                columns: <SqliteImportColumnDraft>[
+                  for (final column in table.columns)
+                    switch (column.sourceName) {
+                      'code' => column.copyWith(targetName: 'account_code'),
+                      'amount' => column.copyWith(targetName: 'balance'),
+                      _ => column,
+                    },
+                ],
+              );
+            }
+            if (table.sourceName == 'child') {
+              return table.copyWith(
+                targetName: 'account_events',
+                columns: <SqliteImportColumnDraft>[
+                  for (final column in table.columns)
+                    switch (column.sourceName) {
+                      'parent_id' => column.copyWith(targetName: 'account_id'),
+                      'code_ref' => column.copyWith(
+                        targetName: 'account_code_ref',
+                      ),
+                      _ => column,
+                    },
+                ],
+              );
+            }
+            return table;
+          }).toList(),
+        );
+        final updates = await bridge.importSqlite(request: request).toList();
+        final summary = updates.last.summary!;
+
+        expect(updates.last.kind, SqliteImportUpdateKind.completed);
+        expect(summary.skippedItems, isEmpty);
+        expect(summary.indexesCreated, hasLength(3));
+
+        await bridge.openDatabase(targetPath);
+        final schema = await bridge.loadSchema();
+        final customerAccounts = schema.objectNamed('customer_accounts');
+        final accountEvents = schema.objectNamed('account_events');
+        final importedStatus = customerAccounts!.columns.firstWhere(
+          (column) => column.name == 'status',
+        );
+        final importedDoubled = customerAccounts.columns.firstWhere(
+          (column) => column.name == 'doubled',
+        );
+        final accountId = accountEvents!.columns.firstWhere(
+          (column) => column.name == 'account_id',
+        );
+        final accountCodeRef = accountEvents.columns.firstWhere(
+          (column) => column.name == 'account_code_ref',
+        );
+
+        expect(importedStatus.defaultExpr, contains('active'));
+        expect(importedDoubled.generatedStored, isTrue);
+        expect(
+          importedDoubled.generatedExpr!.replaceAll(' ', ''),
+          contains('balance'),
+        );
+        expect(
+          customerAccounts.checks.map(
+            (check) => check.exprSql.replaceAll(' ', ''),
+          ),
+          contains(
+            predicate<String>(
+              (expr) => expr.contains('balance') && expr.contains('>=0'),
+            ),
+          ),
+        );
+        expect(accountId.refTable, 'customer_accounts');
+        expect(accountId.refColumn, 'id');
+        expect(accountId.refOnDelete, 'CASCADE');
+        expect(accountId.refOnUpdate, 'RESTRICT');
+        expect(accountCodeRef.refTable, 'customer_accounts');
+        expect(accountCodeRef.refColumn, 'account_code');
+        expect(accountCodeRef.refOnDelete, 'CASCADE');
+        expect(accountCodeRef.refOnUpdate, 'CASCADE');
+        expect(
+          schema.indexes.any(
+            (index) =>
+                index.table == 'account_events' &&
+                index.unique &&
+                index.columns.length == 2 &&
+                index.columns[0] == 'account_id' &&
+                index.columns[1] == 'account_code_ref',
+          ),
+          isTrue,
+        );
+        expect(
+          schema.indexes.any(
+            (index) =>
+                index.table == 'account_events' &&
+                index.predicateSql != null &&
+                index.predicateSql!.contains('account_id'),
+          ),
+          isTrue,
+        );
+        expect(
+          schema.indexes.any(
+            (index) =>
+                index.table == 'account_events' &&
+                index.ddl != null &&
+                index.ddl!.toUpperCase().contains('LOWER') &&
+                index.ddl!.contains('account_code_ref'),
+          ),
+          isTrue,
+        );
+
+        final generatedRows = await queryAllRows(
+          'SELECT doubled FROM customer_accounts WHERE id = 1',
+        );
+        expect(
+          double.parse(generatedRows.single['doubled'].toString()),
+          closeTo(21.0, 0.0001),
+        );
+
+        await expectBridgeFailure(
+          () => exec(
+            'INSERT INTO account_events (id, account_id, account_code_ref, value) VALUES (99, 1, \$1, 1)',
+            params: const <Object?>['ADA-001'],
+          ),
+        );
+
+        await exec('DELETE FROM customer_accounts WHERE id = 2');
+        final remainingChildren = await queryAllRows(
+          'SELECT id FROM account_events ORDER BY id',
+        );
+        expect(
+          remainingChildren.map((row) => row['id']),
+          orderedEquals(<Object?>[1]),
+        );
       },
     );
 

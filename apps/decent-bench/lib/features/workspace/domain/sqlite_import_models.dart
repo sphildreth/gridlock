@@ -61,27 +61,30 @@ class SqliteImportForeignKey {
 class SqliteImportIndex {
   const SqliteImportIndex({
     required this.name,
-    String? column,
+    this.column,
     List<String>? elements,
     required this.unique,
     this.whereSql,
-  }) : elements =
-           elements ?? (column == null ? const <String>[] : <String>[column]);
+  }) : elements = elements ?? const <String>[];
 
   final String name;
+  final String? column;
   final List<String> elements;
   final bool unique;
   final String? whereSql;
 
-  String? get column => elements.isEmpty ? null : elements.first;
-  bool get isComposite => elements.length > 1;
+  List<String> get resolvedElements => elements.isNotEmpty
+      ? elements
+      : (column == null ? const <String>[] : <String>[column!]);
+
+  bool get isComposite => resolvedElements.length > 1;
   bool get isPartial => whereSql != null && whereSql!.trim().isNotEmpty;
 
   Map<String, Object?> toMap() {
     return <String, Object?>{
       'name': name,
       'column': column,
-      'elements': elements,
+      'elements': resolvedElements,
       'unique': unique,
       'whereSql': whereSql,
     };

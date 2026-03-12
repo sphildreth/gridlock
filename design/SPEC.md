@@ -535,6 +535,11 @@ Capabilities:
 - list and select tables
 - copy schema and data
 - map SQLite affinities to DecentDB types
+- preserve column defaults, stored generated columns, and table/column `CHECK`
+  constraints
+- preserve single-column foreign keys plus `ON DELETE` / `ON UPDATE` actions
+- preserve SQLite BTREE indexes that DecentDB supports, including multi-column,
+  partial, and supported expression indexes
 
 Edge cases:
 
@@ -542,6 +547,8 @@ Edge cases:
 - `WITHOUT ROWID` tables
 - `BLOB` handling
 - nullability inference
+- SQLite virtual generated columns are imported as regular value columns with
+  warnings because DecentDB currently supports stored generated columns
 
 ### 7.4 SQL dump import (MariaDB/MySQL style)
 
