@@ -581,48 +581,159 @@ class _SectionBranch extends StatelessWidget {
     final theme = Theme.of(context);
     final tokens = context.decentBenchTheme;
     return DecoratedBox(
-      key: ValueKey<String>('schema.branch.$nodeId.$expanded'),
       decoration: BoxDecoration(
         border: Border.all(color: tokens.colors.border),
         color: tokens.sidebar.headerBackground,
       ),
-      child: ExpansionTile(
-        key: PageStorageKey<String>(nodeId),
-        initiallyExpanded: expanded,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-        childrenPadding: const EdgeInsets.only(left: 10, right: 6, bottom: 6),
-        title: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => onSelected(nodeId),
-          onDoubleTap: () {
-            onSelected(nodeId);
-            onExpansionChanged(nodeId, !expanded);
-          },
-          onSecondaryTapDown: (details) =>
-              onShowContextMenu(nodeId, details.globalPosition),
+      child: Column(
+        children: <Widget>[
+          _BranchHeader(
+            key: PageStorageKey<String>(nodeId),
+            nodeId: nodeId,
+            selected: selected,
+            expanded: expanded,
+            icon: icon,
+            label: title,
+            count: count,
+            textStyle: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+              color: tokens.sidebar.headerText,
+            ),
+            iconColor: tokens.sidebar.headerText,
+            onSelect: onSelected,
+            onShowContextMenu: onShowContextMenu,
+            onExpansionChanged: onExpansionChanged,
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 10, right: 6, bottom: 6),
+              child: Column(children: children),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BranchHeader extends StatefulWidget {
+  const _BranchHeader({
+    super.key,
+    required this.nodeId,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.expanded,
+    this.count,
+    required this.textStyle,
+    required this.iconColor,
+    required this.onSelect,
+    required this.onShowContextMenu,
+    required this.onExpansionChanged,
+  });
+
+  static const double _toggleHitWidth = 32;
+  static const Duration _doubleClickWindow = Duration(milliseconds: 300);
+  static const double _doubleClickSlop = 24;
+
+  final String nodeId;
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool expanded;
+  final int? count;
+  final TextStyle? textStyle;
+  final Color iconColor;
+  final ValueChanged<String> onSelect;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
+  final void Function(String nodeId, bool expanded) onExpansionChanged;
+
+  @override
+  State<_BranchHeader> createState() => _BranchHeaderState();
+}
+
+class _BranchHeaderState extends State<_BranchHeader> {
+  DateTime? _lastPrimaryTapAt;
+  Offset? _lastPrimaryTapPosition;
+
+  void _clearTapState() {
+    _lastPrimaryTapAt = null;
+    _lastPrimaryTapPosition = null;
+  }
+
+  void _handlePrimaryTap(TapUpDetails details, double maxWidth) {
+    final tappedToggle =
+        details.localPosition.dx >= maxWidth - _BranchHeader._toggleHitWidth;
+    if (tappedToggle) {
+      _clearTapState();
+      widget.onExpansionChanged(widget.nodeId, !widget.expanded);
+      return;
+    }
+
+    widget.onSelect(widget.nodeId);
+
+    final now = DateTime.now();
+    final lastTapAt = _lastPrimaryTapAt;
+    final lastTapPosition = _lastPrimaryTapPosition;
+    final isDoubleClick =
+        lastTapAt != null &&
+        now.difference(lastTapAt) <= _BranchHeader._doubleClickWindow &&
+        lastTapPosition != null &&
+        (details.localPosition - lastTapPosition).distance <=
+            _BranchHeader._doubleClickSlop;
+    if (isDoubleClick) {
+      _clearTapState();
+      widget.onExpansionChanged(widget.nodeId, !widget.expanded);
+      return;
+    }
+
+    _lastPrimaryTapAt = now;
+    _lastPrimaryTapPosition = details.localPosition;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.decentBenchTheme;
+    return LayoutBuilder(
+      builder: (context, constraints) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (details) => _handlePrimaryTap(details, constraints.maxWidth),
+        onSecondaryTapDown: (details) =>
+            widget.onShowContextMenu(widget.nodeId, details.globalPosition),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Row(
             children: <Widget>[
               Icon(
-                icon,
+                widget.icon,
                 size: tokens.metrics.iconSize,
-                color: tokens.sidebar.headerText,
+                color: widget.iconColor,
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    color: tokens.sidebar.headerText,
+              Expanded(child: Text(widget.label, style: widget.textStyle)),
+              if (widget.count != null)
+                _CountBadge(
+                  key: ValueKey<String>('schema.count.${widget.nodeId}'),
+                  count: widget.count!,
+                ),
+              const SizedBox(width: 4),
+              SizedBox(
+                width: _BranchHeader._toggleHitWidth,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: AnimatedRotation(
+                    duration: const Duration(milliseconds: 160),
+                    turns: widget.expanded ? 0.25 : 0,
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      size: tokens.metrics.iconSize + 4,
+                      color: widget.iconColor,
+                    ),
                   ),
                 ),
               ),
-              _CountBadge(count: count),
             ],
           ),
         ),
-        onExpansionChanged: (value) => onExpansionChanged(nodeId, value),
-        children: children,
       ),
     );
   }
@@ -667,6 +778,77 @@ class _ObjectBranch extends StatelessWidget {
   }
 }
 
+class _BranchNode extends StatelessWidget {
+  const _BranchNode({
+    required this.nodeId,
+    required this.label,
+    required this.icon,
+    this.count,
+    required this.selectedNodeId,
+    required this.expandedNodes,
+    required this.onSelectNode,
+    required this.onShowContextMenu,
+    required this.onExpansionChanged,
+    required this.children,
+    this.inset = 0,
+  });
+
+  final String nodeId;
+  final String label;
+  final IconData icon;
+  final int? count;
+  final String? selectedNodeId;
+  final Set<String> expandedNodes;
+  final ValueChanged<String> onSelectNode;
+  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
+  final void Function(String nodeId, bool expanded) onExpansionChanged;
+  final List<Widget> children;
+  final double inset;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = selectedNodeId == nodeId;
+    final expanded = expandedNodes.contains(nodeId);
+    final theme = Theme.of(context);
+    final tokens = context.decentBenchTheme;
+    return Container(
+      key: ValueKey<String>('schema.branch.$nodeId.$expanded'),
+      margin: EdgeInsets.only(left: inset, bottom: 4),
+      color: selected ? tokens.sidebar.itemSelectedBackground : null,
+      child: Column(
+        children: <Widget>[
+          _BranchHeader(
+            key: PageStorageKey<String>(nodeId),
+            nodeId: nodeId,
+            label: label,
+            icon: icon,
+            selected: selected,
+            expanded: expanded,
+            count: count,
+            textStyle: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected
+                  ? tokens.sidebar.itemSelectedText
+                  : tokens.sidebar.itemText,
+            ),
+            iconColor: selected
+                ? tokens.sidebar.itemSelectedText
+                : tokens.sidebar.itemText,
+            onSelect: onSelectNode,
+            onShowContextMenu: onShowContextMenu,
+            onExpansionChanged: onExpansionChanged,
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 12, bottom: 4),
+              child: Column(children: children),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FolderBranch extends StatelessWidget {
   const _FolderBranch({
     required this.nodeId,
@@ -706,95 +888,6 @@ class _FolderBranch extends StatelessWidget {
       onExpansionChanged: onExpansionChanged,
       inset: 10,
       children: children,
-    );
-  }
-}
-
-class _BranchNode extends StatelessWidget {
-  const _BranchNode({
-    required this.nodeId,
-    required this.label,
-    required this.icon,
-    this.count,
-    required this.selectedNodeId,
-    required this.expandedNodes,
-    required this.onSelectNode,
-    required this.onShowContextMenu,
-    required this.onExpansionChanged,
-    required this.children,
-    this.inset = 0,
-  });
-
-  final String nodeId;
-  final String label;
-  final IconData icon;
-  final int? count;
-  final String? selectedNodeId;
-  final Set<String> expandedNodes;
-  final ValueChanged<String> onSelectNode;
-  final void Function(String nodeId, Offset globalPosition) onShowContextMenu;
-  final void Function(String nodeId, bool expanded) onExpansionChanged;
-  final List<Widget> children;
-  final double inset;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = selectedNodeId == nodeId;
-    final expanded = expandedNodes.contains(nodeId);
-    final theme = Theme.of(context);
-    final tokens = context.decentBenchTheme;
-    return Container(
-      key: ValueKey<String>('schema.branch.$nodeId.$expanded'),
-      margin: EdgeInsets.only(left: inset, bottom: 4),
-      color: selected ? tokens.sidebar.itemSelectedBackground : null,
-      child: ExpansionTile(
-        key: PageStorageKey<String>(nodeId),
-        initiallyExpanded: expanded,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-        childrenPadding: const EdgeInsets.only(left: 12, bottom: 4),
-        collapsedShape: const RoundedRectangleBorder(),
-        shape: const RoundedRectangleBorder(),
-        title: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => onSelectNode(nodeId),
-          onDoubleTap: () {
-            onSelectNode(nodeId);
-            onExpansionChanged(nodeId, !expanded);
-          },
-          onSecondaryTapDown: (details) =>
-              onShowContextMenu(nodeId, details.globalPosition),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                icon,
-                size: tokens.metrics.iconSize,
-                color: selected
-                    ? tokens.sidebar.itemSelectedText
-                    : tokens.sidebar.itemText,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  label,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? tokens.sidebar.itemSelectedText
-                        : tokens.sidebar.itemText,
-                  ),
-                ),
-              ),
-              if (count != null)
-                _CountBadge(
-                  key: ValueKey<String>('schema.count.$nodeId'),
-                  count: count!,
-                ),
-            ],
-          ),
-        ),
-        onExpansionChanged: (value) => onExpansionChanged(nodeId, value),
-        children: children,
-      ),
     );
   }
 }

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head><title>09_data_types_test.html</title></head>
+<body>
+
+<table id="basic_types">
+  <thead>
+    <tr>
+      <th>id</th>
+      <th>tinyint_col</th>
+      <th>smallint_col</th>
+      <th>integer_col</th>
+      <th>bigint_col</th>
+      <th>float_col</th>
+      <th>real_col</th>
+      <th>double_col</th>
+      <th>numeric_col</th>
+      <th>decimal_col</th>
+      <th>char_col</th>
+      <th>varchar_col</th>
+      <th>text_col</th>
+      <th>date_col</th>
+      <th>time_col</th>
+      <th>datetime_col</th>
+      <th>timestamp_col</th>
+      <th>bool_col</th>
+      <th>blob_col</th>
+      <th>nullable_col</th>
+      <th>json_col</th>
+      <th>uuid_col</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>14</td><td>28481</td><td>-2100691133</td><td>2620585251013273657</td><td>989.398877</td><td>9.19E+98</td><td>1.79E+308</td><td>98066.01</td><td>-33126.52</td><td>HancUNHAO </td><td>rikHYD9SksN</td><td>Hello World</td><td>2024-01-15</td><td>10:30:00</td><td>2024-01-15 10:30:00</td><td>2024-01-15 10:30:00.123</td><td>1</td><td>binary_data_here</td><td>value1</td><td>{"key": "value_1", "nested": {"a": 1}}</td><td>026210e4-2fd9-412a-b8e8-b72a6a54acec</td></tr>
+    <tr><td>2</td><td>-115</td><td>23296</td><td>1491103147</td><td>-6202713063863638852</td><td>-231.732312</td><td>8.06E+98</td><td>1.79E+308</td><td>13944.24</td><td>-65825.74</td><td>NNpSSdU   </td><td>7P87ngSz9C</td><td>Test String</td><td>2024-02-20</td><td>14:45:30</td><td>2024-02-20 14:45:30</td><td>2024-02-20 14:45:30.456</td><td>0</td><td>blob_content</td><td></td><td>{"key": "value_2", "nested": {"a": 2}}</td><td>a0bb768a-c3c8-46b6-ab70-5498c527041d</td></tr>
+    <tr><td>3</td><td>127</td><td>32767</td><td>2147483647</td><td>9223372036854775807</td><td>3.14159</td><td>2.71828</td><td>3.14159265</td><td>12345.67</td><td>99999.99</td><td>Pi         </td><td>3.14159</td><td>Numeric value</td><td>1999-12-31</td><td>23:59:59</td><td>1999-12-31 23:59:59</td><td>1999-12-31 23:59:59.999</td><td>1</td><td>NULL</td><td>NULL</td><td>{"key": "value_3", "array": [1,2,3]}</td><td>12345678-1234-1234-1234-123456789012</td></tr>
+    <tr><td>4</td><td>-128</td><td>-32768</td><td>-2147483648</td><td>-9223372036854775808</td><td>-1000.5</td><td>-1.0E+99</td><td>-1.0E+308</td><td>-5000.00</td><td>-99999.99</td><td>Negative  </td><td>-1000.5</td><td>Negative numbers</td><td>1970-01-01</td><td>00:00:00</td><td>1970-01-01 00:00:00</td><td>1970-01-01 00:00:00.000</td><td>0</td><td></td><td></td><td>{"key": "negative"}</td><td>ffffffff-ffff-ffff-ffff-ffffffffffff</td></tr>
+    <tr><td>5</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td><td>0.0</td><td>0.0</td><td>0.00</td><td>0.00</td><td>Zero      </td><td>zero</td><td>Zero values</td><td>2024-06-15</td><td>12:00:00</td><td>2024-06-15 12:00:00</td><td>2024-06-15 12:00:00.000</td><td>0</td><td></td><td></td><td>{"count": 0}</td><td>00000000-0000-0000-0000-000000000000</td></tr>
+  </tbody>
+</table>
+
+<table id="bool_types">
+  <thead>
+    <tr><th>id</th><th>bool_as_int</th><th>bool_as_text</th><th>bool_as_char</th><th>bool_as_word</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>0</td><td>false</td><td>0</td><td>no</td></tr>
+    <tr><td>2</td><td>1</td><td>true</td><td>1</td><td>yes</td></tr>
+    <tr><td>3</td><td>0</td><td>false</td><td>f</td><td>no</td></tr>
+    <tr><td>4</td><td>1</td><td>true</td><td>t</td><td>yes</td></tr>
+    <tr><td>5</td><td>0</td><td>FALSE</td><td>N</td><td>off</td></tr>
+    <tr><td>6</td><td>1</td><td>TRUE</td><td>Y</td><td>on</td></tr>
+    <tr><td>7</td><td>0</td><td>False</td><td>n</td><td>disabled</td></tr>
+    <tr><td>8</td><td>1</td><td>True</td><td>y</td><td>enabled</td></tr>
+    <tr><td>9</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>10</td><td></td><td>unknown</td><td>?</td><td>pending</td></tr>
+  </tbody>
+</table>
+
+<table id="datetime_types">
+  <thead>
+    <tr><th>id</th><th>iso_date</th><th>us_date</th><th>eu_date</th><th>iso_datetime</th><th>unix_timestamp</th><th>epoch_millis</th><th>natural_language</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>2024-01-15</td><td>01/15/2024</td><td>15.01.2024</td><td>2024-01-15 10:30:00</td><td>1705315800</td><td>1705315800000</td><td>today</td></tr>
+    <tr><td>2</td><td>2024-02-20</td><td>02/20/2024</td><td>20.02.2024</td><td>2024-02-20 14:45:30</td><td>1708437930</td><td>1708437930000</td><td>yesterday</td></tr>
+    <tr><td>3</td><td>2024-03-10</td><td>03/10/2024</td><td>10.03.2024</td><td>2024-03-10 08:00:00</td><td>1710057600</td><td>1710057600000</td><td>tomorrow</td></tr>
+    <tr><td>4</td><td>1999-12-31</td><td>12/31/1999</td><td>31.12.1999</td><td>1999-12-31 23:59:59</td><td>946684799</td><td>946684799000</td><td>last century</td></tr>
+    <tr><td>5</td><td>2030-01-01</td><td>01/01/2030</td><td>01.01.2030</td><td>2030-01-01 00:00:00</td><td>1893456000</td><td>1893456000000</td><td>next decade</td></tr>
+    <tr><td>6</td><td>1970-01-01</td><td>01/01/1970</td><td>01.01.1970</td><td>1970-01-01 00:00:00</td><td>0</td><td>0</td><td>epoch</td></tr>
+    <tr><td>7</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>8</td><td>0001-01-01</td><td>01/01/0001</td><td>01.01.0001</td><td>0001-01-01 00:00:00</td><td></td><td></td><td>ancient</td></tr>
+  </tbody>
+</table>
+
+<table id="text_types">
+  <thead>
+    <tr><th>id</th><th>empty</th><th>whitespace</th><th>unicode</th><th>emoji</th><th>html</th><th>json</th><th>xml</th><th>sql_injection</th><th>base64</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td></td><td>   </td><td>Hello World</td><td>😀</td><td>&lt;html&gt;</td><td>{"key":"value"}</td><td>&lt;xml&gt;</td><td>'; DROP TABLE users; --</td><td>SGVsbG8gV29ybGQ=</td></tr>
+    <tr><td>2</td><td></td><td>\t\n\r</td><td>こんにちは世界</td><td>🎉🔥</td><td>&lt;p&gt;Test&lt;/p&gt;</td><td>{"nested":{"a":1}}</td><td>&lt;root&gt;&lt;item&gt;value&lt;/item&gt;&lt;/root&gt;</td><td>1=1</td><td>YWJjZGVm</td></tr>
+    <tr><td>3</td><td></td><td>mixed  spaces</td><td>مرحبا بالعالم</td><td>💻🚀🌟</td><td>&lt;div class="test"&gt;</td><td>{"array":[1,2,3,"text"]}</td><td>&lt;?xml version="1.0"?&gt;</td><td>admin'--</td><td>dGVzdA==</td></tr>
+    <tr><td>4</td><td></td><td>  leading</td><td>Привет мир</td><td>🔢🔤🔠</td><td>&lt;script&gt;alert(1)&lt;/script&gt;</td><td>{"bool":true,"null":null}</td><td>&lt;rss&gt;&lt;channel&gt;</td><td>1; DELETE FROM users</td><td>ZGF0YQ==</td></tr>
+    <tr><td>5</td><td></td><td>trailing  </td><td>你好世界</td><td>⭐💫✨</td><td>&lt;body&gt;&lt;/body&gt;</td><td>{"number":42.5}</td><td>&lt;soap:Envelope&gt;</td><td>UNION SELECT *</td><td>cGxlYXNlcw==</td></tr>
+    <tr><td>6</td><td></td><td></td><td>한국어</td><td>🎄🎅🎁</td><td>&amp;amp;</td><td>{"unicode":"こんにちは"}</td><td>&lt;config&gt;&lt;setting&gt;</td><td>&lt;script&gt;</td><td>bWljcm9z</td></tr>
+  </tbody>
+</table>
+
+<table id="numeric_edge_cases">
+  <thead>
+    <tr><th>id</th><th>zero</th><th>negative_zero</th><th>positive</th><th>negative</th><th>very_small</th><th>very_large</th><th>infinity</th><th>minus_infinity</th><th>nan</th><th>null_value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>0</td><td>-0</td><td>123.456</td><td>-123.456</td><td>1E-300</td><td>1E300</td><td>Infinity</td><td>-Infinity</td><td>NaN</td><td></td></tr>
+    <tr><td>2</td><td>0</td><td>-0.0</td><td>0.0001</td><td>-0.0001</td><td>2.225E-308</td><td>1.798E308</td><td>INF</td><td>-INF</td><td>NaN</td><td></td></tr>
+    <tr><td>3</td><td>0</td><td>0</td><td>999999</td><td>-999999</td><td>1.0E-100</td><td>1.0E+100</td><td>1.79E+308</td><td>-1.79E+308</td><td></td><td></td></tr>
+    <tr><td>4</td><td>0</td><td>-0</td><td>3.14159265</td><td>-3.14159265</td><td>1E-10</td><td>1E10</td><td>1.0E+999</td><td>-1.0E+999</td><td>#NUM!</td><td></td></tr>
+    <tr><td>5</td><td>0</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  </tbody>
+</table>
+
+<table id="null_handling">
+  <thead>
+    <tr><th>id</th><th>all_nulls</th><th>some_nulls</th><th>null_int</th><th>null_real</th><th>null_text</th><th>null_blob</th><th>empty_vs_null</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td></td><td>value</td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>2</td><td></td><td></td><td></td><td></td><td></td><td></td><td>empty</td></tr>
+    <tr><td>3</td><td></td><td>text</td><td>42</td><td>3.14</td><td>hello</td><td>binary</td><td></td></tr>
+    <tr><td>4</td><td></td><td>not null</td><td>0</td><td>0.0</td><td>0</td><td>0</td><td>0</td></tr>
+    <tr><td>5</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>6</td><td></td><td>NULL</td><td></td><td></td><td></td><td></td><td>NULL</td></tr>
+    <tr><td>7</td><td></td><td>undefined</td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>8</td><td></td><td></td><td></td><td></td><td></td><td></td><td>none</td></tr>
+  </tbody>
+</table>
+
+<table id="enum_types">
+  <thead>
+    <tr><th>id</th><th>status</th><th>priority</th><th>category</th><th>role</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>pending</td><td>low</td><td>electronics</td><td>admin</td></tr>
+    <tr><td>2</td><td>active</td><td>medium</td><td>clothing</td><td>user</td></tr>
+    <tr><td>3</td><td>completed</td><td>high</td><td>food</td><td>guest</td></tr>
+    <tr><td>4</td><td>cancelled</td><td>critical</td><td>books</td><td>moderator</td></tr>
+    <tr><td>5</td><td>failed</td><td>low</td><td>sports</td><td>editor</td></tr>
+    <tr><td>6</td><td>pending</td><td>medium</td><td>toys</td><td>admin</td></tr>
+    <tr><td>7</td><td>active</td><td>high</td><td>electronics</td><td>user</td></tr>
+    <tr><td>8</td><td>completed</td><td>critical</td><td>food</td><td>guest</td></tr>
+    <tr><td>9</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>10</td><td>pending</td><td>medium</td><td>clothing</td><td>user</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>
