@@ -41,9 +41,17 @@ class GenericInspectionFixtureEntry {
 }
 
 class SqliteImportFixtureEntry {
-  const SqliteImportFixtureEntry({required this.relativePath});
+  const SqliteImportFixtureEntry({
+    required this.relativePath,
+    this.expectedTableNames,
+    this.expectedRowCountsByTable = const <String, int>{},
+    this.expectedColumnTypesByTable = const <String, Map<String, String>>{},
+  });
 
   final String relativePath;
+  final List<String>? expectedTableNames;
+  final Map<String, int> expectedRowCountsByTable;
+  final Map<String, Map<String, String>> expectedColumnTypesByTable;
 }
 
 class SqliteInspectionFixtureEntry {
@@ -99,6 +107,68 @@ class DetectionFixtureEntry {
   final List<String> expectedWarningSubstrings;
   final List<ImportFormatKey> expectedArchiveCandidateKeys;
 }
+
+const List<String> _allTypesMediumTableNames = <String>[
+  'basic_types',
+  'bool_types',
+  'datetime_types',
+  'enum_types',
+  'null_handling',
+  'numeric_edge_cases',
+  'text_types',
+];
+
+const Map<String, int> _allTypesMediumRowCounts = <String, int>{
+  'basic_types': 100,
+  'bool_types': 50,
+  'datetime_types': 50,
+  'text_types': 50,
+  'numeric_edge_cases': 50,
+  'null_handling': 50,
+  'enum_types': 50,
+};
+
+const Map<String, Map<String, String>> _allTypesMediumColumnTypes =
+    <String, Map<String, String>>{
+      'basic_types': <String, String>{
+        'tinyint_col': 'INTEGER',
+        'float_col': 'FLOAT64',
+        'numeric_col': 'DECIMAL(10,2)',
+        'date_col': 'TIMESTAMP',
+        'time_col': 'TIMESTAMP',
+        'datetime_col': 'TIMESTAMP',
+        'timestamp_col': 'TIMESTAMP',
+        'bool_col': 'BOOLEAN',
+        'blob_col': 'BLOB',
+        'uuid_col': 'UUID',
+      },
+      'bool_types': <String, String>{
+        'bool_as_int': 'BOOLEAN',
+        'bool_as_text': 'BOOLEAN',
+        'bool_as_char': 'BOOLEAN',
+      },
+      'datetime_types': <String, String>{
+        'iso_date': 'TIMESTAMP',
+        'us_date': 'TIMESTAMP',
+        'eu_date': 'TIMESTAMP',
+        'iso_datetime': 'TIMESTAMP',
+        'unix_timestamp': 'TIMESTAMP',
+        'epoch_millis': 'TIMESTAMP',
+        'natural_language': 'TEXT',
+      },
+      'numeric_edge_cases': <String, String>{
+        'zero': 'INTEGER',
+        'negative_zero': 'FLOAT64',
+        'infinity': 'FLOAT64',
+        'nan': 'FLOAT64',
+      },
+      'text_types': <String, String>{
+        'unicode': 'TEXT',
+        'emoji': 'TEXT',
+        'json': 'TEXT',
+        'xml': 'TEXT',
+      },
+    };
 
 const List<GenericImportFixtureEntry> genericImportRoundTripFixtures =
     <GenericImportFixtureEntry>[
@@ -337,6 +407,12 @@ const List<SqliteImportFixtureEntry> sqliteImportRoundTripFixtures =
       ),
       SqliteImportFixtureEntry(
         relativePath: 'test-data/sqlite/06_complex_relations.sqlite',
+      ),
+      SqliteImportFixtureEntry(
+        relativePath: 'test-data/sqlite/07_all_types_medium.sqlite',
+        expectedTableNames: _allTypesMediumTableNames,
+        expectedRowCountsByTable: _allTypesMediumRowCounts,
+        expectedColumnTypesByTable: _allTypesMediumColumnTypes,
       ),
     ];
 

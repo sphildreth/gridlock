@@ -158,6 +158,30 @@ CREATE TABLE blob_samples (
       return sourcePath;
     }
 
+    String createSqliteTextDateSource(String filename) {
+      final sourcePath = p.join(tempDir.path, filename);
+      final source = sqlite.sqlite3.open(sourcePath);
+      try {
+        source.execute('''
+CREATE TABLE events (
+  id INTEGER PRIMARY KEY,
+  event_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  note TEXT
+)
+''');
+        source.execute(
+          "INSERT INTO events VALUES (1, '2026-03-10', '2026-03-10T14:30:00Z', 'Alpha')",
+        );
+        source.execute(
+          "INSERT INTO events VALUES (2, '2026-03-11', '2026-03-11T09:45:00Z', 'Beta')",
+        );
+      } finally {
+        source.close();
+      }
+      return sourcePath;
+    }
+
     String createSqliteImplicitFkSource(String filename) {
       final sourcePath = p.join(tempDir.path, filename);
       final source = sqlite.sqlite3.open(sourcePath);
@@ -1016,6 +1040,42 @@ JOIN users AS u ON u.id = p.owner_id
 ''');
         expect(rows.single['name'], 'Favorites');
         expect(rows.single['owner_name'], 'Ada');
+      },
+    );
+
+    test(
+      'infers TIMESTAMP for SQLite text columns when sampled values are date-like',
+      skip: skipReason,
+      () async {
+        final sourcePath = createSqliteTextDateSource(
+          'phase4-text-dates.sqlite',
+        );
+
+        final inspection = await bridge.inspectSqliteSource(
+          sourcePath: sourcePath,
+        );
+        final events = inspection.tables.singleWhere(
+          (table) => table.sourceName == 'events',
+        );
+
+        expect(
+          events.columns
+              .firstWhere((column) => column.sourceName == 'event_date')
+              .targetType,
+          'TIMESTAMP',
+        );
+        expect(
+          events.columns
+              .firstWhere((column) => column.sourceName == 'created_at')
+              .targetType,
+          'TIMESTAMP',
+        );
+        expect(
+          events.columns
+              .firstWhere((column) => column.sourceName == 'note')
+              .targetType,
+          'TEXT',
+        );
       },
     );
 

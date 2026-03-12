@@ -50,6 +50,13 @@ const Set<String> _nonImportDocumentationFixturePaths = <String>{
   'test-data/excel/README.txt',
 };
 
+bool _isIgnoredFixturePath(String relativePath) {
+  return _nonImportDocumentationFixturePaths.contains(relativePath) ||
+      relativePath.endsWith('.ddb') ||
+      relativePath.endsWith('.ddb-wal') ||
+      relativePath.endsWith('.ddb-shm');
+}
+
 void main() {
   const defaultNativeLib = '/home/steven/source/decentdb/build/libc_api.so';
   final nativeLib =
@@ -93,9 +100,9 @@ void main() {
         .whereType<File>()
         .map((file) => p.normalize(p.relative(file.path, from: repoRoot)))
         .toSet();
-    final importFixturePaths = discoveredFixturePaths.difference(
-      _nonImportDocumentationFixturePaths,
-    );
+    final importFixturePaths = discoveredFixturePaths
+        .where((path) => !_isIgnoredFixturePath(path))
+        .toSet();
     final manifestFixturePaths = _manifestCoveredFixturePaths();
     final uncoveredFixturePaths = importFixturePaths.difference(
       manifestFixturePaths,
@@ -359,6 +366,43 @@ void main() {
             reason:
                 'Expected at least one selected SQLite table for ${fixture.relativePath}',
           );
+          final expectedTableNames = fixture.expectedTableNames;
+          if (expectedTableNames != null) {
+            expect(
+              selectedTables.map((table) => table.targetName).toSet(),
+              equals(expectedTableNames.toSet()),
+              reason: 'Unexpected preview tables for ${fixture.relativePath}',
+            );
+          }
+          for (final table in selectedTables) {
+            final expectedRowCount =
+                fixture.expectedRowCountsByTable[table.targetName];
+            if (expectedRowCount != null) {
+              expect(
+                table.rowCount,
+                expectedRowCount,
+                reason:
+                    'Unexpected preview row count for ${fixture.relativePath}:${table.targetName}',
+              );
+            }
+            final expectedColumnTypes =
+                fixture.expectedColumnTypesByTable[table.targetName];
+            if (expectedColumnTypes == null) {
+              continue;
+            }
+            final previewColumnTypes = <String, String>{
+              for (final column in table.columns)
+                column.targetName: column.targetType,
+            };
+            for (final entry in expectedColumnTypes.entries) {
+              expect(
+                previewColumnTypes[entry.key],
+                entry.value,
+                reason:
+                    'Unexpected preview type for ${fixture.relativePath}:${table.targetName}.${entry.key}',
+              );
+            }
+          }
 
           final request = SqliteImportRequest(
             jobId: _jobIdFor(fixture.relativePath),
@@ -385,6 +429,7 @@ void main() {
           );
 
           await bridge.openDatabase(request.targetPath);
+          final schema = await bridge.loadSchema();
           for (final table in selectedTables) {
             final actualRows = await _queryAllRows(
               bridge,
@@ -407,6 +452,29 @@ void main() {
               reason:
                   'Copied row count mismatch for ${fixture.relativePath}:${table.targetName}',
             );
+            final expectedColumnTypes =
+                fixture.expectedColumnTypesByTable[table.targetName];
+            if (expectedColumnTypes != null) {
+              final importedObject = schema.objectNamed(table.targetName);
+              expect(
+                importedObject,
+                isNotNull,
+                reason:
+                    'Missing imported schema for ${fixture.relativePath}:${table.targetName}',
+              );
+              final importedColumnTypes = <String, String>{
+                for (final column in importedObject!.columns)
+                  column.name: _normalizeImportedSchemaType(column.type),
+              };
+              for (final entry in expectedColumnTypes.entries) {
+                expect(
+                  importedColumnTypes[entry.key],
+                  entry.value,
+                  reason:
+                      'Unexpected imported type for ${fixture.relativePath}:${table.targetName}.${entry.key}',
+                );
+              }
+            }
             expect(
               actualSignatures,
               orderedEquals(expectedSignatures),
@@ -995,6 +1063,12 @@ Object? _canonicalizeValue(Object? value) {
 
 Object _normalizeNumericValue(num value) {
   final asDouble = value.toDouble();
+  if (asDouble.isNaN) {
+    return 'NaN';
+  }
+  if (asDouble.isInfinite) {
+    return asDouble.isNegative ? '-Infinity' : 'Infinity';
+  }
   return asDouble == asDouble.roundToDouble() ? asDouble.toInt() : asDouble;
 }
 
@@ -1035,22 +1109,7 @@ Object? _adaptSqliteImportValue(Object? value, String targetType) {
     return null;
   }
   if (targetType == 'BOOLEAN') {
-    if (value is bool) {
-      return value;
-    }
-    if (value is int && (value == 0 || value == 1)) {
-      return value == 1;
-    }
-    if (value is String) {
-      final normalized = value.trim().toLowerCase();
-      if (normalized == 'true' || normalized == '1') {
-        return true;
-      }
-      if (normalized == 'false' || normalized == '0') {
-        return false;
-      }
-    }
-    return value;
+    return _coerceSqliteBooleanValue(value);
   }
   if (targetType == 'TEXT' && value is Uint8List) {
     return formatCellValue(value);
@@ -1058,17 +1117,183 @@ Object? _adaptSqliteImportValue(Object? value, String targetType) {
   if (targetType == 'BLOB' && value is String) {
     return Uint8List.fromList(value.codeUnits);
   }
-  if (targetType == 'TIMESTAMP' && value is String) {
-    return DateTime.tryParse(value)?.toUtc() ?? value;
+  if (targetType == 'TIMESTAMP') {
+    return _tryParseSqliteTimestampValue(value) ?? value;
   }
-  if (targetType == 'TIMESTAMP' && value is DateTime) {
-    return value.toUtc();
+  if (targetType == 'UUID' && value is String) {
+    return _uuidBytes(value);
   }
   if ((targetType.startsWith('DECIMAL') || targetType.startsWith('NUMERIC')) &&
       value is num) {
     return value.toString();
   }
   return value;
+}
+
+Object? _coerceSqliteBooleanValue(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is int && (value == 0 || value == 1)) {
+    return value == 1;
+  }
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (const <String>{'true', '1', 'yes', 'y'}.contains(normalized)) {
+      return true;
+    }
+    if (const <String>{'false', '0', 'no', 'n'}.contains(normalized)) {
+      return false;
+    }
+  }
+  return value;
+}
+
+DateTime? _tryParseSqliteTimestampValue(Object? value) {
+  if (value is DateTime) {
+    return value.toUtc();
+  }
+  if (value is int) {
+    return _tryParseEpochTimestampValue(value);
+  }
+  if (value is double && value == value.roundToDouble()) {
+    return _tryParseEpochTimestampValue(value.toInt());
+  }
+  if (value is! String) {
+    return null;
+  }
+
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  final parsed = DateTime.tryParse(trimmed);
+  if (parsed != null) {
+    return parsed.toUtc();
+  }
+
+  final slashParsed = _tryParseSlashTimestampValue(trimmed);
+  if (slashParsed != null) {
+    return slashParsed;
+  }
+
+  final dotParsed = _tryParseDotTimestampValue(trimmed);
+  if (dotParsed != null) {
+    return dotParsed;
+  }
+
+  final timeOnlyParsed = _tryParseTimeOnlyTimestampValue(trimmed);
+  if (timeOnlyParsed != null) {
+    return timeOnlyParsed;
+  }
+
+  final asInteger = int.tryParse(trimmed);
+  if (asInteger == null) {
+    return null;
+  }
+  return _tryParseEpochTimestampValue(asInteger);
+}
+
+DateTime? _tryParseTimeOnlyTimestampValue(String value) {
+  final match = RegExp(
+    r'^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  final microsRaw = match.group(4) ?? '';
+  final micros = microsRaw.isEmpty
+      ? 0
+      : int.parse(microsRaw.padRight(6, '0').substring(0, 6));
+  return _buildUtcTimestampValue(
+    year: 0,
+    month: 1,
+    day: 1,
+    hour: int.parse(match.group(1)!),
+    minute: int.parse(match.group(2)!),
+    second: int.tryParse(match.group(3) ?? '0') ?? 0,
+    microsecond: micros,
+  );
+}
+
+DateTime? _tryParseSlashTimestampValue(String value) {
+  final match = RegExp(
+    r'^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  return _buildUtcTimestampValue(
+    year: int.parse(match.group(3)!),
+    month: int.parse(match.group(1)!),
+    day: int.parse(match.group(2)!),
+    hour: int.tryParse(match.group(4) ?? '0') ?? 0,
+    minute: int.tryParse(match.group(5) ?? '0') ?? 0,
+    second: int.tryParse(match.group(6) ?? '0') ?? 0,
+  );
+}
+
+DateTime? _tryParseDotTimestampValue(String value) {
+  final match = RegExp(
+    r'^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  return _buildUtcTimestampValue(
+    year: int.parse(match.group(3)!),
+    month: int.parse(match.group(2)!),
+    day: int.parse(match.group(1)!),
+    hour: int.tryParse(match.group(4) ?? '0') ?? 0,
+    minute: int.tryParse(match.group(5) ?? '0') ?? 0,
+    second: int.tryParse(match.group(6) ?? '0') ?? 0,
+  );
+}
+
+DateTime? _buildUtcTimestampValue({
+  required int year,
+  required int month,
+  required int day,
+  int hour = 0,
+  int minute = 0,
+  int second = 0,
+  int microsecond = 0,
+}) {
+  try {
+    final parsed = DateTime.utc(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      0,
+      microsecond,
+    );
+    if (parsed.year != year ||
+        parsed.month != month ||
+        parsed.day != day ||
+        parsed.hour != hour ||
+        parsed.minute != minute ||
+        parsed.second != second ||
+        parsed.microsecond != microsecond) {
+      return null;
+    }
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+DateTime? _tryParseEpochTimestampValue(int value) {
+  if (value >= 0 && value <= 4102444800) {
+    return DateTime.fromMillisecondsSinceEpoch(value * 1000, isUtc: true);
+  }
+  if (value >= 0 && value <= 4102444800000) {
+    return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+  }
+  return null;
 }
 
 Uint8List _uuidBytes(String value) {
@@ -1116,6 +1341,14 @@ String _jobIdFor(String relativePath) {
 
 String _quoteIdentifier(String value) {
   return '"${value.replaceAll('"', '""')}"';
+}
+
+String _normalizeImportedSchemaType(String type) {
+  return switch (type.toUpperCase()) {
+    'INT64' => 'INTEGER',
+    'BOOL' => 'BOOLEAN',
+    _ => type.toUpperCase(),
+  };
 }
 
 Set<String> _manifestCoveredFixturePaths() {

@@ -43,6 +43,7 @@ class SqlEditorPane extends StatelessWidget {
     required this.onAutocompleteNext,
     required this.onAutocompletePrevious,
     required this.onAcceptAutocomplete,
+    required this.onDismissAutocomplete,
     required this.canRun,
     required this.canStop,
     required this.onFindChanged,
@@ -91,6 +92,7 @@ class SqlEditorPane extends StatelessWidget {
   final VoidCallback onAutocompleteNext;
   final VoidCallback onAutocompletePrevious;
   final VoidCallback onAcceptAutocomplete;
+  final VoidCallback onDismissAutocomplete;
   final bool canRun;
   final bool canStop;
   final ValueChanged<String> onFindChanged;
@@ -219,6 +221,9 @@ class SqlEditorPane extends StatelessWidget {
                                       SingleActivator(
                                         LogicalKeyboardKey.arrowUp,
                                       ): _PreviousAutocompleteIntent(),
+                                      SingleActivator(
+                                        LogicalKeyboardKey.escape,
+                                      ): _DismissAutocompleteIntent(),
                                     },
                               child: Actions(
                                 actions: <Type, Action<Intent>>{
@@ -242,6 +247,15 @@ class SqlEditorPane extends StatelessWidget {
                                       >(
                                         onInvoke: (_) {
                                           onAutocompletePrevious();
+                                          return null;
+                                        },
+                                      ),
+                                  _DismissAutocompleteIntent:
+                                      CallbackAction<
+                                        _DismissAutocompleteIntent
+                                      >(
+                                        onInvoke: (_) {
+                                          onDismissAutocomplete();
                                           return null;
                                         },
                                       ),
@@ -721,6 +735,7 @@ class _AutocompletePopup extends StatelessWidget {
         elevation: 6,
         color: tokens.editor.background,
         child: Container(
+          key: const ValueKey<String>('sql_editor.autocomplete_popup'),
           width: popupWidth,
           constraints: BoxConstraints(maxHeight: popupHeight),
           decoration: BoxDecoration(
@@ -878,6 +893,10 @@ class _NextAutocompleteIntent extends Intent {
 
 class _PreviousAutocompleteIntent extends Intent {
   const _PreviousAutocompleteIntent();
+}
+
+class _DismissAutocompleteIntent extends Intent {
+  const _DismissAutocompleteIntent();
 }
 
 class _StateChip extends StatelessWidget {

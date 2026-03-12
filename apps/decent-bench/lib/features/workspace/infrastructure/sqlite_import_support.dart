@@ -692,6 +692,24 @@ SqliteImportTableDraft _inspectTable(
     'SELECT COUNT(*) AS row_count FROM ${_quoteSqliteIdent(tableName)}',
   );
   final rowCount = rowCountResult.first['row_count']! as int;
+  final inferredColumnTypes = _inferColumnTypesFromSamples(
+    database,
+    tableName,
+    columns,
+  );
+  if (inferredColumnTypes.isNotEmpty) {
+    for (var index = 0; index < columns.length; index++) {
+      final column = columns[index];
+      final inferredType = inferredColumnTypes[column.sourceName];
+      if (inferredType == null) {
+        continue;
+      }
+      columns[index] = column.copyWith(
+        inferredTargetType: inferredType,
+        targetType: inferredType,
+      );
+    }
+  }
 
   return SqliteImportTableDraft(
     sourceName: tableName,
@@ -1698,22 +1716,7 @@ Object? _adaptImportValue(Object? value, String targetType) {
     return null;
   }
   if (targetType == 'BOOLEAN') {
-    if (value is bool) {
-      return value;
-    }
-    if (value is int && (value == 0 || value == 1)) {
-      return value == 1;
-    }
-    if (value is String) {
-      final normalized = value.trim().toLowerCase();
-      if (normalized == 'true' || normalized == '1') {
-        return true;
-      }
-      if (normalized == 'false' || normalized == '0') {
-        return false;
-      }
-    }
-    return value;
+    return _coerceBooleanValue(value);
   }
   if (targetType == 'TEXT' && value is Uint8List) {
     return formatCellValue(value);
@@ -1721,17 +1724,346 @@ Object? _adaptImportValue(Object? value, String targetType) {
   if (targetType == 'BLOB' && value is String) {
     return Uint8List.fromList(value.codeUnits);
   }
-  if (targetType == 'TIMESTAMP' && value is String) {
-    final parsed = DateTime.tryParse(value);
-    return parsed?.toUtc() ?? value;
-  }
-  if (targetType == 'TIMESTAMP' && value is DateTime) {
-    return value.toUtc();
+  if (targetType == 'TIMESTAMP') {
+    return _tryParseTimestampValue(value) ?? value;
   }
   if (_isDecimalType(targetType) && value is num) {
     return value.toString();
   }
   return value;
+}
+
+Map<String, String> _inferColumnTypesFromSamples(
+  sqlite.Database database,
+  String tableName,
+  List<SqliteImportColumnDraft> columns, {
+  int sampleSize = 64,
+}) {
+  final candidateColumns = columns
+      .where(_canInferColumnTypeFromSamples)
+      .toList(growable: false);
+  if (candidateColumns.isEmpty) {
+    return const <String, String>{};
+  }
+
+  final quotedColumns = candidateColumns
+      .map((column) => _quoteSqliteIdent(column.sourceName))
+      .join(', ');
+  final rows = database.select(
+    'SELECT $quotedColumns FROM ${_quoteSqliteIdent(tableName)} LIMIT $sampleSize',
+  );
+  if (rows.isEmpty) {
+    return const <String, String>{};
+  }
+
+  final inferredColumns = <String, String>{};
+  for (final column in candidateColumns) {
+    final sampledValues = <Object?>[
+      for (final row in rows) row[column.sourceName],
+    ];
+    final inferredType = _inferColumnTypeFromSamples(column, sampledValues);
+    if (inferredType != null && inferredType != column.inferredTargetType) {
+      inferredColumns[column.sourceName] = inferredType;
+    }
+  }
+  return inferredColumns;
+}
+
+bool _canInferColumnTypeFromSamples(SqliteImportColumnDraft column) {
+  return column.inferredTargetType == 'TEXT' ||
+      column.inferredTargetType == 'INTEGER';
+}
+
+String? _inferColumnTypeFromSamples(
+  SqliteImportColumnDraft column,
+  Iterable<Object?> values,
+) {
+  final nonNullValues = values
+      .where((value) => value != null)
+      .toList(growable: false);
+  if (nonNullValues.isEmpty) {
+    return null;
+  }
+  if (column.inferredTargetType == 'TEXT') {
+    if (_allSampledValuesAreUuids(nonNullValues)) {
+      return 'UUID';
+    }
+    if (_allSampledValuesAreBooleans(nonNullValues)) {
+      return 'BOOLEAN';
+    }
+    if (_allSampledValuesAreTimestamps(
+      nonNullValues,
+      columnName: column.sourceName,
+    )) {
+      return 'TIMESTAMP';
+    }
+    return null;
+  }
+  if (column.inferredTargetType == 'INTEGER') {
+    if (_looksLikeBooleanColumnName(column.sourceName) &&
+        _allSampledValuesAreBooleans(nonNullValues)) {
+      return 'BOOLEAN';
+    }
+    if (_looksLikeTemporalColumnName(column.sourceName) &&
+        _allSampledValuesAreTimestamps(
+          nonNullValues,
+          columnName: column.sourceName,
+        )) {
+      return 'TIMESTAMP';
+    }
+  }
+  return null;
+}
+
+bool _allSampledValuesAreUuids(Iterable<Object?> values) {
+  final nonNullValues = values
+      .where((value) => value != null)
+      .toList(growable: false);
+  if (nonNullValues.isEmpty) {
+    return false;
+  }
+  return nonNullValues.every(_isUuidLikeValue);
+}
+
+bool _isUuidLikeValue(Object? value) {
+  if (value is! String) {
+    return false;
+  }
+  return RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  ).hasMatch(value.trim());
+}
+
+bool _allSampledValuesAreBooleans(Iterable<Object?> values) {
+  final nonNullValues = values
+      .where((value) => value != null)
+      .toList(growable: false);
+  if (nonNullValues.isEmpty) {
+    return false;
+  }
+  return nonNullValues.every(_isBooleanLikeValue);
+}
+
+bool _isBooleanLikeValue(Object? value) {
+  if (value is bool) {
+    return true;
+  }
+  if (value is int) {
+    return value == 0 || value == 1;
+  }
+  if (value is! String) {
+    return false;
+  }
+  return const <String>{
+    'true',
+    'false',
+    '1',
+    '0',
+    'yes',
+    'no',
+    'y',
+    'n',
+  }.contains(value.trim().toLowerCase());
+}
+
+Object? _coerceBooleanValue(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is int && (value == 0 || value == 1)) {
+    return value == 1;
+  }
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (const <String>{'true', '1', 'yes', 'y'}.contains(normalized)) {
+      return true;
+    }
+    if (const <String>{'false', '0', 'no', 'n'}.contains(normalized)) {
+      return false;
+    }
+  }
+  return value;
+}
+
+bool _allSampledValuesAreTimestamps(
+  Iterable<Object?> values, {
+  required String columnName,
+}) {
+  final nonNullValues = values
+      .where((value) => value != null)
+      .toList(growable: false);
+  if (nonNullValues.isEmpty) {
+    return false;
+  }
+  return nonNullValues.every(
+    (value) => _tryParseTimestampValue(value, columnName: columnName) != null,
+  );
+}
+
+DateTime? _tryParseTimestampValue(Object? value, {String? columnName}) {
+  if (value is DateTime) {
+    return value.toUtc();
+  }
+  if (value is int) {
+    return _tryParseEpochTimestamp(value, columnName: columnName);
+  }
+  if (value is double && value == value.roundToDouble()) {
+    return _tryParseEpochTimestamp(value.toInt(), columnName: columnName);
+  }
+  if (value is! String) {
+    return null;
+  }
+
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  final parsed = DateTime.tryParse(trimmed);
+  if (parsed != null) {
+    return parsed.toUtc();
+  }
+
+  final slashParsed = _tryParseSlashDateTime(trimmed);
+  if (slashParsed != null) {
+    return slashParsed;
+  }
+
+  final dotParsed = _tryParseDotDateTime(trimmed);
+  if (dotParsed != null) {
+    return dotParsed;
+  }
+
+  final timeOnlyParsed = _tryParseTimeOnlyDateTime(trimmed);
+  if (timeOnlyParsed != null) {
+    return timeOnlyParsed;
+  }
+
+  final asInteger = int.tryParse(trimmed);
+  if (asInteger == null) {
+    return null;
+  }
+  return _tryParseEpochTimestamp(asInteger, columnName: columnName);
+}
+
+DateTime? _tryParseTimeOnlyDateTime(String value) {
+  final match = RegExp(
+    r'^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  final microsRaw = match.group(4) ?? '';
+  final micros = microsRaw.isEmpty
+      ? 0
+      : int.parse(microsRaw.padRight(6, '0').substring(0, 6));
+  return _buildUtcTimestamp(
+    year: 0,
+    month: 1,
+    day: 1,
+    hour: int.parse(match.group(1)!),
+    minute: int.parse(match.group(2)!),
+    second: int.tryParse(match.group(3) ?? '0') ?? 0,
+    microsecond: micros,
+  );
+}
+
+DateTime? _tryParseSlashDateTime(String value) {
+  final match = RegExp(
+    r'^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  return _buildUtcTimestamp(
+    year: int.parse(match.group(3)!),
+    month: int.parse(match.group(1)!),
+    day: int.parse(match.group(2)!),
+    hour: int.tryParse(match.group(4) ?? '0') ?? 0,
+    minute: int.tryParse(match.group(5) ?? '0') ?? 0,
+    second: int.tryParse(match.group(6) ?? '0') ?? 0,
+  );
+}
+
+DateTime? _tryParseDotDateTime(String value) {
+  final match = RegExp(
+    r'^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$',
+  ).firstMatch(value);
+  if (match == null) {
+    return null;
+  }
+  return _buildUtcTimestamp(
+    year: int.parse(match.group(3)!),
+    month: int.parse(match.group(2)!),
+    day: int.parse(match.group(1)!),
+    hour: int.tryParse(match.group(4) ?? '0') ?? 0,
+    minute: int.tryParse(match.group(5) ?? '0') ?? 0,
+    second: int.tryParse(match.group(6) ?? '0') ?? 0,
+  );
+}
+
+DateTime? _buildUtcTimestamp({
+  required int year,
+  required int month,
+  required int day,
+  int hour = 0,
+  int minute = 0,
+  int second = 0,
+  int microsecond = 0,
+}) {
+  try {
+    final parsed = DateTime.utc(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      0,
+      microsecond,
+    );
+    if (parsed.year != year ||
+        parsed.month != month ||
+        parsed.day != day ||
+        parsed.hour != hour ||
+        parsed.minute != minute ||
+        parsed.second != second ||
+        parsed.microsecond != microsecond) {
+      return null;
+    }
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+DateTime? _tryParseEpochTimestamp(int value, {String? columnName}) {
+  final allowEpochParsing =
+      columnName == null || _looksLikeTemporalColumnName(columnName);
+  if (!allowEpochParsing) {
+    return null;
+  }
+  if (value >= 0 && value <= 4102444800) {
+    return DateTime.fromMillisecondsSinceEpoch(value * 1000, isUtc: true);
+  }
+  if (value >= 0 && value <= 4102444800000) {
+    return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+  }
+  return null;
+}
+
+bool _looksLikeTemporalColumnName(String columnName) {
+  final normalized = columnName.trim().toLowerCase();
+  return RegExp(
+    r'(^|_)(date|time|datetime|timestamp|epoch)(_|$)|_at$',
+  ).hasMatch(normalized);
+}
+
+bool _looksLikeBooleanColumnName(String columnName) {
+  final normalized = columnName.trim().toLowerCase();
+  return RegExp(
+    r'(^is_|^has_|(^|_)(bool|boolean|flag|enabled|disabled|active|inactive)(_|$))',
+  ).hasMatch(normalized);
 }
 
 String mapSqliteDeclaredTypeToDecentDb(String declaredType) {

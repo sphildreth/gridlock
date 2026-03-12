@@ -123,6 +123,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _pendingSqlEditorStateRebuild = false;
   bool _pendingControllerSync = false;
   int _autocompleteSelectionIndex = 0;
+  TextEditingValue? _dismissedAutocompleteValue;
   String? _pendingSqlText;
   String? _pendingParamsText;
   SqlExecutionTarget _lastSqlExecutionTarget = const SqlExecutionTarget(
@@ -383,6 +384,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         _acceptAutocompleteSuggestion(
                                           autocompleteResult,
                                         ),
+                                    onDismissAutocomplete: _dismissAutocomplete,
                                     canRun: controller.canRunActiveTab,
                                     canStop: controller.canCancelActiveTab,
                                     onFindChanged: _handleFindChanged,
@@ -484,6 +486,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         _paramsController.text == activeTab.parameterJson) {
       return;
     }
+    _dismissedAutocompleteValue = null;
+    _autocompleteSelectionIndex = 0;
     _pendingControllerSync = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pendingControllerSync = false;
@@ -507,6 +511,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _handleSqlChanged(String value) {
+    _dismissedAutocompleteValue = null;
     _autocompleteSelectionIndex = 0;
     widget.controller.updateActiveSql(value);
   }
@@ -892,6 +897,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   AutocompleteResult _autocompleteFor(WorkspaceController controller) {
+    final value = _sqlController.value;
+    if (_dismissedAutocompleteValue == value) {
+      return const AutocompleteResult(
+        replaceStart: 0,
+        replaceEnd: 0,
+        suggestions: <AutocompleteSuggestion>[],
+      );
+    }
     final selection = _sqlController.selection;
     final offset = selection.isValid && selection.baseOffset >= 0
         ? selection.baseOffset
@@ -943,6 +956,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       result,
       result.suggestions[_selectedAutocompleteIndexFor(result)],
     );
+  }
+
+  void _dismissAutocomplete() {
+    setState(() {
+      _dismissedAutocompleteValue = _sqlController.value;
+      _autocompleteSelectionIndex = 0;
+    });
   }
 
   Future<void> _checkNativeMenuAvailability() async {
@@ -2428,6 +2448,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _openSqlTemplate(String sql) {
+    _dismissedAutocompleteValue = null;
     _autocompleteSelectionIndex = 0;
     widget.controller.createTab(sql: sql);
   }
@@ -2560,6 +2581,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _insertSnippet(SqlSnippet snippet) {
+    _dismissedAutocompleteValue = null;
     _autocompleteSelectionIndex = 0;
     final text = _sqlController.text;
     final selection = _sqlController.selection;
@@ -2580,6 +2602,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     AutocompleteResult result,
     AutocompleteSuggestion suggestion,
   ) {
+    _dismissedAutocompleteValue = null;
     _autocompleteSelectionIndex = 0;
     final current = _sqlController.text;
     final updated =
