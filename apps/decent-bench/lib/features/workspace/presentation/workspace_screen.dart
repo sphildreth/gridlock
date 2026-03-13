@@ -2093,18 +2093,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<void> _handleStartupLaunchOptions(
     StartupLaunchOptions launchOptions,
   ) async {
-    final startupNotice = launchOptions.startupNotice?.trim();
-    if (startupNotice != null && startupNotice.isNotEmpty) {
-      await _showPlaceholderNotice('Command-line import', startupNotice);
-      return;
-    }
-
-    final importSourcePath = launchOptions.importSourcePath?.trim();
-    if (importSourcePath == null || importSourcePath.isEmpty) {
-      return;
-    }
-
-    await _startImportFromPath(importSourcePath);
+    await applyStartupLaunchOptions(
+      launchOptions,
+      showNotice: _showPlaceholderNotice,
+      openDatabase: (path) {
+        return widget.controller.openDatabase(path, createIfMissing: false);
+      },
+      startImport: _startImportFromPath,
+    );
   }
 
   Future<void> _startImportFromPath(String path) async {
