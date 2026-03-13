@@ -19,7 +19,7 @@
     <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square">
   </a>
   <img alt="Flutter desktop" src="https://img.shields.io/badge/Flutter-desktop-02569B?style=flat-square&logo=flutter&logoColor=white">
-  <img alt="DecentDB v1.7.x" src="https://img.shields.io/badge/DecentDB-v1.6.x-6f42c1?style=flat-square">
+  <img alt="DecentDB v1.7.x" src="https://img.shields.io/badge/DecentDB-v1.7.x-6f42c1?style=flat-square">
 </p>
 
 <p align="center">
