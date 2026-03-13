@@ -47,7 +47,7 @@ dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle
 dart run tool/stage_decentdb_native.dart --bundle build/linux/x64/release/bundle --verify-only
 ```
 
-The app expects a compatible DecentDB v1.6.x native library to be available via:
+The app expects a compatible DecentDB v1.7.x native library to be available via:
 
 1. `DECENTDB_NATIVE_LIB`
 2. a bundled desktop runner path
